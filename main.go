@@ -38,6 +38,28 @@ func readAMF0String(r io.Reader) (string, error) {
 	return string(strBuf), nil
 }
 
+// readAMF0StringBody: 이미 타입 마커(0x02)를 확인한 후,
+// 문자열의 길이(2바이트)를 읽고, 그만큼의 데이터를 문자열로 반환합니다.
+func readAMF0StringBody(r io.Reader) (string, error) {
+	// 1. 길이 정보 읽기 (2바이트, Big-Endian)
+	lenBuf := make([]byte, 2)
+	_, err := io.ReadFull(r, lenBuf)
+	if err != nil {
+		return "", err
+	}
+
+	strLen := binary.BigEndian.Uint16(lenBuf)
+
+	// 2. 문자열 내용 읽기
+	strBuf := make([]byte, strLen)
+	_, err = io.ReadFull(r, strBuf)
+	if err != nil {
+		return "", err
+	}
+
+	return string(strBuf), nil
+}
+
 func handleRTMPChunkStream(conn net.Conn) {
 	// OBS는 처음에 청크 크기를 128 bytes로 설정해서 보냅니다.
 	chunkSize := 128
@@ -271,19 +293,52 @@ func handleRTMPChunkStream(conn net.Conn) {
 
 			} else if cmdName == "publish" {
 				fmt.Println("publish 명령어 찾았습니다. 스트림 키 추출")
+
+				// 1. Transaction ID (Number 타입, 9 bytes) 건너뛰기
+				// AF0에서 Number = 1byte(type) + 8bytes(값) = 9bytes
+				msgReader.Read(make([]byte, 9))
+
+				// 2. Command Object (Null type, 1byte) 건너뛰기
+				msgReader.Read(make([]byte, 1))
+
+				// 3. 여기에 stream key(string) 있을껄?
 				for {
-					str, err := readAMF0String(msgReader)
+					marker := make([]byte, 1)
+					_, err := msgReader.Read(marker)
 					if err != nil {
-						// 더 이상 읽을 String이 없으면 종료
 						break
 					}
 
-					// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
-					if str != "" && str != "live" {
-						fmt.Printf("최종 추출된 스트림 키: %s\n", str)
-						return
+					// marker가 0x02(string)일 때만 읽기 시도
+					if marker[0] == 0x02 {
+						// string 타입 읽기 (앞의 길이를 읽고 그만큼 문자열 읽기)
+						str, err := readAMF0StringBody(msgReader)
+						if err != nil {
+							// 더 이상 읽을 String이 없으면 종료
+							break
+						}
+
+						// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
+						if str != "" && str != "live" {
+							fmt.Printf("최종 추출된 스트림 키: %s\n", str)
+							return
+						}
 					}
 				}
+
+				//for {
+				//	str, err := readAMF0String(msgReader)
+				//	if err != nil {
+				//		// 더 이상 읽을 String이 없으면 종료
+				//		break
+				//	}
+				//
+				//	// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
+				//	if str != "" && str != "live" {
+				//		fmt.Printf("최종 추출된 스트림 키: %s\n", str)
+				//		return
+				//	}
+				//}
 			} else {
 				// 다른 명령어(connect 등)일 때는 남은 메세지 바이트를 비워줌
 				// 그래야 다음 청크를 읽을 수 있음
