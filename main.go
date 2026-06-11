@@ -67,7 +67,7 @@ func handleRTMPChunkStream(conn net.Conn) {
 		//0x02: string (명령어 이름이나 스트림 키)
 		//0x00: Number (go 에서는 float64)
 		//0x03: object
-		if bfmt == 0 {
+		if bfmt == 0 { // connect 나 publish는 0에 들어있음
 			// fmt 0는 11bytes 짜리 가장 무거운 헤더입니다. (새로운 메세지 시작 알림)
 			msgHeader := make([]byte, 11)
 			if _, err := io.ReadFull(conn, msgHeader); err != nil {
@@ -86,8 +86,61 @@ func handleRTMPChunkStream(conn net.Conn) {
 			// msgHeader[7:11] = Message Stream ID (4바이트, LittleEndian인 경우가 많음)
 
 			fmt.Printf("Message Length: %d 바이트, Message Type ID: %d (0x%02x)\n", msgLength, msgTypeID, msgTypeID)
+		} else if bfmt == 1 { // Chunk Format 1 (7 byte header), createStream은 fmt == 1
+			header := make([]byte, 7)
+			_, err := io.ReadFull(conn, header)
+			if err != nil {
+				log.Println("fmt 1 헤더 읽기 에러:", err)
+				break
+			}
+
+			// index 3,4,5는 Message Length
+			msgLength := int(header[3]<<16 | header[4]<<8 | header[5])
+			// index 6는 Message Type ID
+			msgTypeID := int(header[6])
+
+			fmt.Printf("msg Length: %d 바이트, msg Type ID: %d (0x%02x)\n", msgLength, msgTypeID, msgTypeID)
+
+			// 이 청크의 데이터만큼만 읽을 수 있는 Reader 생성
+			msgReader := io.LimitReader(conn, int64(msgLength))
+
+			if msgTypeID == 20 {
+				cmdName, err := readAMF0String(msgReader)
+				if err == nil {
+					fmt.Printf("[AF0 Command] 명령어 감지: %s\n", cmdName)
+
+					// 🚨 바로 이곳! fmt=1 블록 안에서 createStream을 잡아야 합니다.
+					if cmdName == "createStream" {
+						fmt.Println("📺 OBS가 방송 채널(Stream) 생성을 요청했습니다. 1번 채널을 할당합니다.")
+
+						// 남은 데이터 비우기
+						io.Copy(io.Discard, msgReader)
+
+						// createStream 승인 패킷 (1번 채널 부여, Transaction ID 4.0 하드코딩)
+						createStreamResponse := []byte{
+							0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1d, 0x14, 0x00, 0x00, 0x00, 0x00,
+							0x02, 0x00, 0x07, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+							0x00, 0x40, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Number: 4.0
+							0x05,                                                 // Null
+							0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Number: 1.0 (Stream ID)
+						}
+
+						_, err := conn.Write(createStreamResponse)
+						if err != nil {
+							log.Println("createStream 응답 전송 실패:", err)
+						} else {
+							fmt.Println("👉 채널 할당 완료! 이제 진짜 publish가 옵니다!")
+						}
+
+						// 명령어를 처리했으니 다음 루프로 넘어갑니다.
+						continue
+					}
+				}
+			}
+
+			io.Copy(io.Discard, msgReader)
 		} else {
-			// fmt가 1,2,3 일 때는 이전 헤더 정보를 재사용하므로 간략화된 헤더가 옵니다.
+			// fmt가 2,3 일 때는 이전 헤더 정보를 재사용하므로 간략화된 헤더가 옵니다.
 			// 로우 레벨 구현 시에는 이전 상태를 구조체에 저장하고 매칭해야 됩니다.
 			fmt.Printf("간략화된 청크 포맷(fmt:%d)입니다. 일단 생략하고 다음 바이트로 이동합니다.\n", bfmt)
 			continue
@@ -117,7 +170,106 @@ func handleRTMPChunkStream(conn net.Conn) {
 
 			// OBS connect -> releaseStream -> FCPublish -> createStream -> publish 순으로 보냅니다.
 
-			if cmdName == "publish" {
+			if cmdName == "connect" {
+				fmt.Println("OBS 연결 요청. 승인 응답(_result) 전송")
+
+				// msgReader 바이트 비움
+				io.Copy(io.Discard, msgReader)
+
+				// 임시
+				// 1. Window Acknowledgement Size (Type 5)
+				// 2. Set Peer Bandwidth (Type 6)
+				// 3. Set Chunk Size (Type 1)
+				// 4. _result (NetConnection.Connect.Success) AMF0 객체
+
+				// todo: 지금은 한명을 위한 임시 ResultBytes 하드 코딩, 추후 다중 BJ 채널 대상으로 동적으로 만들어주도록 수정해야 됨
+				connectResultBytes := []byte{
+					// Window Ack Size (2500000)
+					// 데이터 2.5MB 받을 때마다 신호 줌
+					0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x00, 0x00,
+					// Set Peer Bandwidth (2500000, Dynamic)
+					// OBS도 2.5MB 제한 걸고 보내
+					0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x00, 0x00, 0x02,
+					// Set Chunk Size (4096)
+					// 이제부터 청크 단위 4096으로 설정
+					0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+
+					// _result (Transaction ID 1, Connect.Success)
+					// connect 를 승인
+
+					// Chunk Header start
+					// 0x03: Basic Header (fmt=0, csid=3) -> 지금부터 생판 처음 보내는 완전한 헤더 정보(11 byte) 시작된다
+					0x03,
+					// 타임스탬프: 0초
+					0x00, 0x00, 0x00,
+					// 메세지 길이(0x4e == 78): 이 헤더 뒤에 나오는 데이터(payload)는 117 bytes다
+					0x00, 0x00, 0x4e,
+					// Message Type ID: 0x14==20
+					0x14,
+					// Message Stream ID: 0번 스트림
+					0x00, 0x00, 0x00, 0x00,
+
+					// Chunk Header Start
+					// AMF0 String 마커: 문자열 나온다
+					0x02,
+					// 문자열 길이: 0x07 7byte
+					0x00, 0x07,
+
+					// _result 문자열을 아스키코드로 변환
+					0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+
+					// NetConnection.Connect.Success 아스키코드
+					0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00,
+					0x00, 0x00, 0x00, 0x05, 0x03, 0x00, 0x05, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x02, 0x00, 0x06, 0x73,
+					0x74, 0x61, 0x74, 0x75, 0x73, 0x00, 0x04, 0x63, 0x6f, 0x64, 0x65, 0x02, 0x00, 0x1d, 0x4e, 0x65,
+					0x74, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x43, 0x6f, 0x6e, 0x6e,
+					0x65, 0x63, 0x74, 0x2e, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x00, 0x00, 0x09,
+				}
+
+				// OBS에 승인 메세지 전송
+				_, err := conn.Write(connectResultBytes)
+				if err != nil {
+					log.Println("connect 응답 전송 실패:", err)
+					return
+				}
+				fmt.Println("응답 전송 완료. 이제 OBS가 다음 명령어를 보내는 지 체크")
+
+			} else if cmdName == "createStream" {
+				fmt.Println("OBS가 방송 채널(Stream) 생성 요청했습니다. 1번 채널을 할당합니다.")
+
+				// 데이터 비우기
+				io.Copy(io.Discard, msgReader)
+
+				createStreamResponse := []byte{
+					// [Chunk Header] 11바이트
+					0x03,             // Basic Header (fmt=0, csid=3)
+					0x00, 0x00, 0x00, // 타임스탬프 0
+					0x00, 0x00, 0x1d, // Message Length: 29 바이트 (0x1d)
+					0x14,                   // Message Type ID: 20 (AMF0)
+					0x00, 0x00, 0x00, 0x00, // Message Stream ID: 0
+
+					// [Payload] 29바이트
+					// 1. String: "_result"
+					0x02, 0x00, 0x07, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+					// 2. Number: Transaction ID (4.0)
+					// OBS는 보통 connect(1)->releaseStream(2)->FCPublish(3)->createStream(4) 순으로 번호를 매깁니다.
+					0x00, 0x40, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+					// 3. Null: 명령어 객체 없음
+					0x05,
+
+					// 4. Number: Stream ID (1.0) - "너에게 1번 채널을 줄게!"
+					0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				}
+
+				// 3. 응답 전송!
+				_, err := conn.Write(createStreamResponse)
+				if err != nil {
+					log.Println("createStream 응답 전송 실패:", err)
+					return
+				}
+
+			} else if cmdName == "publish" {
 				fmt.Println("publish 명령어 찾았습니다. 스트림 키 추출")
 				for {
 					str, err := readAMF0String(msgReader)
@@ -128,7 +280,7 @@ func handleRTMPChunkStream(conn net.Conn) {
 
 					// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
 					if str != "" && str != "live" {
-						fmt.Println("최종 추출된 스트림 키: %s\n", str)
+						fmt.Printf("최종 추출된 스트림 키: %s\n", str)
 						return
 					}
 				}
