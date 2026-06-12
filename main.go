@@ -165,10 +165,9 @@ func handleRTMPChunkStream(conn net.Conn) {
 			// fmt가 2,3 일 때는 이전 헤더 정보를 재사용하므로 간략화된 헤더가 옵니다.
 			// 로우 레벨 구현 시에는 이전 상태를 구조체에 저장하고 매칭해야 됩니다.
 			fmt.Printf("간략화된 청크 포맷(fmt:%d)입니다. 일단 생략하고 다음 바이트로 이동합니다.\n", bfmt)
-			continue
 		}
 
-		// 3. 메서지 타입별 처리
+		// 3. 메세지 타입별 처리
 		switch msgTypeID {
 		case 1:
 			// Protocol Control Message: Set Chunk Size
@@ -177,6 +176,19 @@ func handleRTMPChunkStream(conn net.Conn) {
 			io.ReadFull(conn, sizeBuf)
 			chunkSize = int(binary.BigEndian.Uint32(sizeBuf))
 			fmt.Printf("OBS가 청크 크기를 변경함: %d bytes\n", chunkSize)
+
+		case 8:
+			// 오디오 데이터 처리
+			fmt.Printf("🎧 오디오 패킷 수신: %d bytes\n", msgLength)
+			io.CopyN(io.Discard, conn, int64(msgLength)) // 일단은 버리기
+		case 9:
+			// 비디오 데이터 처리
+			fmt.Printf("🎥 비디오 패킷 수신: %d bytes\n", msgLength)
+			io.CopyN(io.Discard, conn, int64(msgLength)) // 일단은 버리기
+		case 18:
+			// 메타데이터(MetaData) 처리
+			fmt.Printf("📊 메타데이터 수신: %d bytes\n", msgLength)
+			io.CopyN(io.Discard, conn, int64(msgLength)) // 일단은 버리기
 
 		case 20:
 			// 0x14: AF0 Command Message (connect, publish 명령어 포함)
@@ -321,24 +333,49 @@ func handleRTMPChunkStream(conn net.Conn) {
 						// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
 						if str != "" && str != "live" {
 							fmt.Printf("최종 추출된 스트림 키: %s\n", str)
-							return
 						}
 					}
 				}
 
-				//for {
-				//	str, err := readAMF0String(msgReader)
-				//	if err != nil {
-				//		// 더 이상 읽을 String이 없으면 종료
-				//		break
-				//	}
-				//
-				//	// 'live' 같은 애플리케이션 이름 뒤에 오는 고유 문자열이 스트림 키입니다.
-				//	if str != "" && str != "live" {
-				//		fmt.Printf("최종 추출된 스트림 키: %s\n", str)
-				//		return
-				//	}
-				//}
+				publishResponse := []byte{
+					// [1. Chunk Header] 12 bytes (Basic Header 1 byte + Msg Header 11 bytes)
+					0x03,             // Basic Header (fmt=0, csid=3)
+					0x00, 0x00, 0x00, // Timestamp (0)
+					0x00, 0x00, 0x49, // Message Length: 73 bytes (0x49)
+					0x14,                   // Message Type ID (20 = AMF0 Command)
+					0x01, 0x00, 0x00, 0x00, // Message Stream ID: 1 (Little Endian) *** 처음에 임시로 1로 했으니
+
+					// [2. Payload] 73 bytes
+					// String: "onStatus" (8 bytes) ⭐️ 길이 수정됨
+					0x02, 0x00, 0x08, 0x6f, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73,
+
+					// Number: Transaction ID (0.0) - onStatus는 보통 0을 사용합니다.
+					0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+					// Null (명령어 객체 없음)
+					0x05,
+
+					// Object 시작
+					0x03,
+					// Property: "level" -> "status"
+					0x00, 0x05, 0x6c, 0x65, 0x76, 0x65, 0x6c, // String: "level"
+					0x02, 0x00, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, // String: "status"
+
+					// Property: "code" -> "NetStream.Publish.Start" ⭐️ 정확한 길이와 아스키코드 적용
+					0x00, 0x04, 0x63, 0x6f, 0x64, 0x65, // String: "code"
+					0x02, 0x00, 0x17, 0x4e, 0x65, 0x74, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x2e, 0x50, 0x75, 0x62, 0x6c, 0x69, 0x73, 0x68, 0x2e, 0x53, 0x74, 0x61, 0x72, 0x74,
+
+					// Object 종료 마커
+					0x00, 0x00, 0x09,
+				}
+
+				_, err = conn.Write(publishResponse)
+				if err != nil {
+					log.Println("publish 응답 전송 실패:", err)
+				} else {
+					fmt.Println("✅ [방송 시작 승인] OBS에게 Publish Start 신호를 보냈습니다.")
+				}
+
 			} else {
 				// 다른 명령어(connect 등)일 때는 남은 메세지 바이트를 비워줌
 				// 그래야 다음 청크를 읽을 수 있음
@@ -346,9 +383,15 @@ func handleRTMPChunkStream(conn net.Conn) {
 			}
 
 		default:
-			// 오디오(8), 비디오(9) 등 파싱 필요 없는건 건너뜀
-			io.CopyN(io.Discard, conn, int64(msgLength))
-			fmt.Printf("미디어/기타 데이터 %d 바이트 패스\n", msgLength)
+			if msgLength > 0 {
+				fmt.Printf("📦 데이터 패킷 수신 (Type: %d, Length: %d)\n", msgTypeID, msgLength)
+				// 데이터를 읽어들이는 코드가 실제로 실행되는지 확인이 필요합니다.
+				data := make([]byte, msgLength)
+				_, err := io.ReadFull(conn, data)
+				if err != nil {
+					log.Printf("데이터 읽기 실패: %v", err)
+				}
+			}
 		}
 	}
 }
@@ -399,7 +442,7 @@ func handleRTMP(conn net.Conn) {
 	}
 
 	fmt.Println("핸드셰이크 성공!")
-	// todo: 바이너리 데이터(chunk)를 읽어 AMF 포맷을 파싱
+	// 바이너리 데이터(chunk)를 읽어 AMF 포맷을 파싱
 	handleRTMPChunkStream(conn)
 }
 
