@@ -11,7 +11,7 @@ import (
 
 // ChunkStream은 각 CSID별로 이전 헤더 정보와 누적된 데이터를 저장
 type ChunkStream struct {
-	Fmt            byte
+	Fmt            byte   // 0: 시작,탐색 1: 타임스탬프 델타와 페이로드의 길이 포함, 2: 스트림 ID와 타임스탬프가 이전 청크와 완전히 동일, 3: 헤더가 없음, 이전 청크와 메세지 크기가 모두 같을 때 사용
 	CSID           uint32 // chunk Stream ID (오디오, 비디오, 제어 메시지), 1 ~ 3byte
 	Timestamp      uint32
 	TimestampDelta uint32 // 이전 청크 간의 시각 차이를 ms 단위로 나타냄 (3bytes)
@@ -20,6 +20,61 @@ type ChunkStream struct {
 	// 8: 오디오, 9: 비디오, 15: 사용자 정의, 18: AFM0 인코딩 데이터, 19: AMF0 인코딩 명령어 ( connect, createStream, publish, _result, _error)
 	MsgStreamID uint32 // ex) 0 방송시작, 종료 제어, 1 ~ n : 영상 및 소리 (얼굴, 게임 화면 등)
 	FullPayload []byte // 완전히 조립될 때까지 데이터 조각을 모으는 버퍼
+}
+
+// RTMP 청크 리더 루프
+// 기존의 바이트로 읽던 루프를 교체, fmt 규격 0,1,2,3 에 따라 헤더를 유연하게 복원
+func handleClient(conn net.Conn) {
+	defer conn.Close()
+	log.Printf("새로운 BJ 연결됨: %s", conn.RemoteAddr().String())
+
+	// 1. 핸드쉐이크
+	// doHandshake(conn)
+
+	// 청크 스트림 상태를 저장할 맵
+	chunkStreams := make(map[uint32]*ChunkStream)
+
+	//chunkSize := uint32(128)
+
+	for {
+		// --- [단계 1] Basic Header 읽기 ---
+		basicHeader := make([]byte, 1)
+		if _, err := io.ReadFull(conn, basicHeader); err != nil {
+			log.Printf("연결 종료 또는 읽기 실패: %v", err)
+			return
+		}
+
+		// 8bis 라 시프트 연산만 수행
+		fmtBytes := basicHeader[0] >> 6
+		// uint32: usid = 65599 overflow 방어
+		csid := uint32(basicHeader[0] & 0x3F)
+
+		if csid == 0 { // csid range: 64-319
+			extCSID := make([]byte, 1)
+			io.ReadFull(conn, extCSID)
+			csid = uint32(extCSID[0]) + 64
+		} else if csid == 1 { // csid range: 64-65599
+			extCSID := make([]byte, 2)
+			io.ReadFull(conn, extCSID)
+			csid = uint32(binary.BigEndian.Uint16(extCSID)) + 64
+		}
+		// 참고: csid 2는 Chunk Size 변경 등 프로토콜 제어용으로 예약
+
+		// 청크를 맵에 할당 or 호출
+		state, exists := chunkStreams[csid]
+		if !exists {
+			state = &ChunkStream{CSID: csid}
+			chunkStreams[csid] = state
+		}
+		state.Fmt = fmtBytes
+
+		// --- [단계 2] fmt에 따른 Message Header 읽기 및 복원 ---
+		switch fmtBytes {
+
+		}
+
+		fmt.Printf("Chunk Format (fmt): %d, Chunk Stream ID (csid): %d\n", fmtBytes, csid)
+	}
 }
 
 // AMF0 문자열을 읽어오는 헬퍼
@@ -512,7 +567,9 @@ func handleRTMP(conn net.Conn) {
 
 	fmt.Println("핸드셰이크 성공!")
 	// 바이너리 데이터(chunk)를 읽어 AMF 포맷을 파싱
-	handleRTMPChunkStream(conn)
+	//handleRTMPChunkStream(conn)
+
+	handleClient(conn)
 }
 
 func main() {
