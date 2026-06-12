@@ -182,9 +182,66 @@ func handleRTMPChunkStream(conn net.Conn) {
 			fmt.Printf("🎧 오디오 패킷 수신: %d bytes\n", msgLength)
 			io.CopyN(io.Discard, conn, int64(msgLength)) // 일단은 버리기
 		case 9:
-			// 비디오 데이터 처리
-			fmt.Printf("🎥 비디오 패킷 수신: %d bytes\n", msgLength)
-			io.CopyN(io.Discard, conn, int64(msgLength)) // 일단은 버리기
+			// 비디오 데이터 처리 (H.264 / AVC)
+			if msgLength == 0 {
+				continue
+			}
+
+			// 1. 전체 비디오 페이로드 읽기
+			videoBuf := make([]byte, msgLength)
+			if _, err := io.ReadFull(conn, videoBuf); err != nil {
+				log.Printf("비디오 패킷 읽기 실패: %v", err)
+				return
+			}
+
+			// 데이터가 너무 작으면 파싱 불가
+			if len(videoBuf) < 5 {
+				continue
+			}
+
+			// 2. 첫 번째 바이트 분석 (FrameType & CodecID)
+			firstByte := videoBuf[0]
+			frameType := firstByte >> 4 // 상위 4비트
+			codecID := firstByte & 0x0F // 하위 4비트
+
+			// 3. 두 번째 바이트 분석 (AVCPacketType)
+			avcPacketType := videoBuf[1]
+
+			// 4. 컴포지션 타임 분석 (3바이트, BigEndian 형태로 계산)
+			compositionTime := uint32(videoBuf[2])<<16 | uint32(videoBuf[3])<<8 | uint32(videoBuf[4])
+
+			// 로그 출력으로 데이터 확인하기
+			var frameTypeName string
+			switch frameType {
+			case 1:
+				frameTypeName = "🔑 Keyframe (I-Frame)"
+			case 2:
+				frameTypeName = "🎬 Inter-frame (P/B-Frame)"
+			default:
+				frameTypeName = "❓ Unknown Frame"
+			}
+
+			var codecName string
+			if codecID == 7 {
+				codecName = "H.264 (AVC)"
+			} else {
+				codecName = fmt.Sprintf("Other (%d)", codecID)
+			}
+
+			fmt.Printf("\n🎥 [비디오 패킷 분석] 크기: %d bytes | 코덱: %s | 타입: %s\n", msgLength, codecName, frameTypeName)
+
+			// AVC 패킷 타입에 따른 분기 처리
+			switch avcPacketType {
+			case 0:
+				fmt.Println("   ➡️ [AVC Sequence Header] 디코더 설정 데이터(SPS/PPS) 수신 완료! (HLS 필수 품목)")
+				// TODO: 이 바이트 배열을 메모리에 잘 보관해 두어야 나중에 .ts 파일을 만들 때 헤더에 박아넣을 수 있습니다.
+			case 1:
+				// 실제 영상 프레임 데이터 (NALU)
+				// videoBuf[5:] 에 진짜 H.264 데이터가 들어있습니다.
+				fmt.Printf("   ➡️ [AVC NALU] 실제 비디오 프레임 데이터 수신 중... (CompositionTime: %d)\n", compositionTime)
+			case 2:
+				fmt.Println("   ➡️ [AVC End of Sequence] 방송 종료 신호")
+			}
 		case 18:
 			// 메타데이터(MetaData) 처리
 			fmt.Printf("📊 메타데이터 수신: %d bytes\n", msgLength)
