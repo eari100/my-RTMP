@@ -9,8 +9,20 @@ import (
 	"net"
 )
 
-// AMF0 문자열을 읽어오는 헬퍼
+// ChunkStream은 각 CSID별로 이전 헤더 정보와 누적된 데이터를 저장
+type ChunkStream struct {
+	Fmt            byte
+	CSID           uint32 // chunk Stream ID (오디오, 비디오, 제어 메시지), 1 ~ 3byte
+	Timestamp      uint32
+	TimestampDelta uint32 // 이전 청크 간의 시각 차이를 ms 단위로 나타냄 (3bytes)
+	MsgLength      uint32
+	MsgTypeID      byte // 1: 청크 크기 설정, 2: 바이트 확인, 3: 확인 응답, 4: 윈도우 확인 크기 설정, 5: 피드백 대역폭 설정
+	// 8: 오디오, 9: 비디오, 15: 사용자 정의, 18: AFM0 인코딩 데이터, 19: AMF0 인코딩 명령어 ( connect, createStream, publish, _result, _error)
+	MsgStreamID uint32 // ex) 0 방송시작, 종료 제어, 1 ~ n : 영상 및 소리 (얼굴, 게임 화면 등)
+	FullPayload []byte // 완전히 조립될 때까지 데이터 조각을 모으는 버퍼
+}
 
+// AMF0 문자열을 읽어오는 헬퍼
 func readAMF0String(r io.Reader) (string, error) {
 	marker := make([]byte, 1)
 	if _, err := io.ReadFull(r, marker); err != nil {
