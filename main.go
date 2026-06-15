@@ -20,6 +20,7 @@ type ChunkStream struct {
 	// 8: 오디오, 9: 비디오, 15: 사용자 정의, 18: AFM0 인코딩 데이터, 19: AMF0 인코딩 명령어 ( connect, createStream, publish, _result, _error)
 	MsgStreamID uint32 // ex) 0 방송시작, 종료 제어, 1 ~ n : 영상 및 소리 (얼굴, 게임 화면 등)
 	FullPayload []byte // 완전히 조립될 때까지 데이터 조각을 모으는 버퍼
+	UseExtTS    bool
 }
 
 // RTMP 청크 리더 루프
@@ -35,6 +36,8 @@ func handleClient(conn net.Conn) {
 	chunkStreams := make(map[uint32]*ChunkStream)
 
 	//chunkSize := uint32(128)
+
+	headerBuf := make([]byte, 11) // 헤더 읽기용 임시 버퍼
 
 	for {
 		// --- [단계 1] Basic Header 읽기 ---
@@ -70,8 +73,57 @@ func handleClient(conn net.Conn) {
 
 		// --- [단계 2] fmt에 따른 Message Header 읽기 및 복원 ---
 		switch fmtBytes {
+		case 0: // 11 bytes 완전한 헤더
+			if _, err := io.ReadFull(conn, headerBuf[:11]); err != nil {
+				return
+			}
 
+			state.Timestamp = uint32(headerBuf[0])<<16 | uint32(headerBuf[1])<<8 | uint32(headerBuf[2])
+			state.MsgLength = uint32(headerBuf[3])<<16 | uint32(headerBuf[4])<<8 | uint32(headerBuf[5])
+			state.MsgTypeID = headerBuf[6]
+			// 특이사항: MsgStreamID는 Little Endian 규격
+			state.MsgStreamID = binary.LittleEndian.Uint32(headerBuf[7:11])
+
+		case 1: // 7 bytes 헤더 (MsgStreamID는 이전 것 재사용)
+			if _, err := io.ReadFull(conn, headerBuf[:7]); err != nil {
+				return
+			}
+
+			state.TimestampDelta = uint32(headerBuf[0])<<16 | uint32(headerBuf[1])<<8 | uint32(headerBuf[2])
+			state.Timestamp += state.TimestampDelta
+			state.MsgLength = uint32(headerBuf[3])<<16 | uint32(headerBuf[4])<<8 | uint32(headerBuf[5])
+			state.MsgTypeID = headerBuf[6]
+
+		case 2: // 3 bytes 헤더 (Length, Type, StreamID 모두 이전 것 재사용)
+			if _, err := io.ReadFull(conn, headerBuf[:3]); err != nil {
+				return
+			}
+
+			state.TimestampDelta = uint32(headerBuf[0])<<16 | uint32(headerBuf[1])<<8 | uint32(headerBuf[2])
+			state.Timestamp += state.TimestampDelta
+
+		case 3: // 0 byte 헤더 (이전 헤더 속성 완벽히 재사용)
+			// fmt 3이고 영상 데이터 도중이라면 TimestampDelta만큼 더해줌
+			if len(state.FullPayload) == 0 { // 0 이라면 분할 시작이라는 뜻이 되니까 그때만 timestamp 증가 시킴
+				state.Timestamp += state.TimestampDelta
+			}
 		}
+
+		// Extended Timestamp 처리 (타임스탬프가 0xFFFFFF 이면 뒤에 4 bytes 생김)
+		if fmtBytes < 3 {
+			state.UseExtTS = state.Timestamp == 0xFFFFFF || state.Timestamp == 0xFFFFFFF
+		}
+
+		if state.UseExtTS {
+			extTS := make([]byte, 4)
+			if _, err := io.ReadFull(conn, extTS); err != nil {
+				return
+			}
+
+			state.Timestamp = binary.BigEndian.Uint32(extTS)
+		}
+
+		// todo: --- [단계 3] 현재 청크 크기만큼만 정확하게 잘라서 읽기 ---
 
 		fmt.Printf("Chunk Format (fmt): %d, Chunk Stream ID (csid): %d\n", fmtBytes, csid)
 	}
