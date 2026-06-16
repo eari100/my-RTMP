@@ -35,7 +35,9 @@ func handleClient(conn net.Conn) {
 	// 청크 스트림 상태를 저장할 맵
 	chunkStreams := make(map[uint32]*ChunkStream)
 
-	//chunkSize := uint32(128)
+	// RTMP 기본 청크 크기는 128바이트로 시작하지만,
+	// OBS가 Set Chunk Size(Type 1)를 보내면 이 변수를 업데이트해야 합니다.
+	chunkSize := uint32(128)
 
 	headerBuf := make([]byte, 11) // 헤더 읽기용 임시 버퍼
 
@@ -110,9 +112,7 @@ func handleClient(conn net.Conn) {
 		}
 
 		// Extended Timestamp 처리 (타임스탬프가 0xFFFFFF 이면 뒤에 4 bytes 생김)
-		if fmtBytes < 3 {
-			state.UseExtTS = state.Timestamp == 0xFFFFFF || state.Timestamp == 0xFFFFFFF
-		}
+		state.UseExtTS = fmtBytes < 3 && (state.Timestamp == 0xFFFFFF || state.Timestamp == 0xFFFFFFF)
 
 		if state.UseExtTS {
 			extTS := make([]byte, 4)
@@ -123,9 +123,49 @@ func handleClient(conn net.Conn) {
 			state.Timestamp = binary.BigEndian.Uint32(extTS)
 		}
 
-		// todo: --- [단계 3] 현재 청크 크기만큼만 정확하게 잘라서 읽기 ---
+		// --- [단계 3] 현재 청크 크기만큼만 정확하게 잘라서 읽기 ---
+		remains := int(state.MsgLength) - len(state.FullPayload)
+		readSize := int(chunkSize)
+		if remains < readSize {
+			readSize = remains
+		}
 
-		fmt.Printf("Chunk Format (fmt): %d, Chunk Stream ID (csid): %d\n", fmtBytes, csid)
+		chunkData := make([]byte, readSize)
+		if _, err := io.ReadFull(conn, chunkData); err != nil {
+			log.Printf("페이로드 읽기 실패: %v", err)
+			return
+		}
+
+		// 청크 데이터 버퍼에 누적
+		state.FullPayload = append(state.FullPayload, chunkData...)
+
+		// --- [단계 4] 데이터가 다 모였을 때만 완전한 메시지로 처리 ---
+		if len(state.FullPayload) == int(state.MsgLength) {
+			// 스펙문서: Protocol control message 1, Set Chunk Size, is used to notify the    peer of a new maximum chunk size
+			if state.CSID == 2 && state.MsgTypeID == 1 {
+				chunkSize = binary.BigEndian.Uint32(state.FullPayload)
+				log.Printf("⚙️ OBS 요청으로 Chunk Size 변경됨: %d 바이트", chunkSize)
+			}
+
+			// todo: 완성된 데이터 메시지 핸들러
+			// processCompleteMessage(state)
+
+			// 다음 패킷을 받기 위해 버퍼 초기화
+			state.FullPayload = nil
+		}
+
+		log.Printf("🔍 [State 변환] Fmt: %d | CSID: %d | MsgType: %d | MsgLen: %d | TS: %d (Delta: %d) | StreamID: %d | ExtTS: %t | PayloadCollected: %d/%d",
+			state.Fmt,
+			state.CSID,
+			state.MsgTypeID,
+			state.MsgLength,
+			state.Timestamp,
+			state.TimestampDelta,
+			state.MsgStreamID,
+			state.UseExtTS,
+			len(state.FullPayload), // 현재까지 모인 바이트 수
+			state.MsgLength,        // 모아야 하는 총 바이트 수
+		)
 	}
 }
 
