@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 )
 
@@ -21,6 +22,67 @@ type ChunkStream struct {
 	MsgStreamID uint32 // ex) 0 방송시작, 종료 제어, 1 ~ n : 영상 및 소리 (얼굴, 게임 화면 등)
 	FullPayload []byte // 완전히 조립될 때까지 데이터 조각을 모으는 버퍼
 	UseExtTS    bool
+}
+
+// 맨앞에 1byte 마커를 읽고, 그에 맞는 바디 파서를 호출하는
+func ReadAMF0(r io.Reader) (interface{}, error) {
+	marker := make([]byte, 1)
+	if _, err := io.ReadFull(r, marker); err != nil {
+		return nil, err
+	}
+
+	switch marker[0] {
+	// Number (float64)
+	case 0x00:
+		return readAMF0Number(r)
+	// Boolean
+	//case 0x01:
+	// String
+	case 0x02:
+		return readAMF0String(r)
+	// Object (Map 구조)
+	//case 0x03:
+
+	// Null
+	case 0x05:
+		return nil, nil
+
+	default:
+		return nil, fmt.Errorf("unknown chunk marker: 0x%02x", marker[0])
+	}
+}
+
+func processCompleteMessage(stream *ChunkStream) {
+	switch stream.MsgTypeID {
+	// todo:  7.1.1.  Command Message (20, 17)
+	// AMF 3 (아마 안 쓸듯)
+	case 17:
+
+	// AMF 0
+	case 20:
+		// todo:
+		reader := bytes.NewReader(stream.FullPayload)
+
+		// 1. Command Name
+		cmdObj, err := ReadAMF0(reader)
+		if err != nil {
+			return
+		}
+		cmd := cmdObj.(string)
+
+		// 2. Transaction ID
+		txObj, err := ReadAMF0(reader)
+		if err != nil {
+			return
+		}
+		tx := txObj.(float64)
+
+		// 3. Command Object
+
+		// 4. Optional User Arguments
+
+		log.Printf("종합 분석 완료 -> 명령어: %s, 트랜잭션 ID: %.0f", cmd, tx)
+	}
 }
 
 // RTMP 청크 리더 루프
@@ -147,8 +209,7 @@ func handleClient(conn net.Conn) {
 				log.Printf("⚙️ OBS 요청으로 Chunk Size 변경됨: %d 바이트", chunkSize)
 			}
 
-			// todo: 완성된 데이터 메시지 핸들러
-			// processCompleteMessage(state)
+			processCompleteMessage(state)
 
 			// 다음 패킷을 받기 위해 버퍼 초기화
 			state.FullPayload = nil
@@ -169,19 +230,27 @@ func handleClient(conn net.Conn) {
 	}
 }
 
+// 2.2 Number Type
+// An AMF 0 Number type is used to encode an ActionScript Number. The data following a Number type marker is always an 8 byte IEEE-754 double precision floating point value in network byte order (sign bit in low memory).
+// number-type = number-marker
+func readAMF0Number(r io.Reader) (float64, error) {
+	buf := make([]byte, 8)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return 0, err
+	}
+
+	bits := binary.BigEndian.Uint64(buf)
+
+	val := math.Float64frombits(bits)
+
+	return val, nil
+}
+
 // AMF0 문자열을 읽어오는 헬퍼
+// string-type        = string-marker UTF-8
+// UTF-8-string = u16 UTF-8-data
 func readAMF0String(r io.Reader) (string, error) {
-	marker := make([]byte, 1)
-	if _, err := io.ReadFull(r, marker); err != nil {
-		return "", err
-	}
-
-	// 0x02가 아니면 AMF0 String이 아님
-	if marker[0] != 0x02 {
-		return "", fmt.Errorf("AMF0 String marker(0x02)가 아닙니다: 0x%02x", marker[0])
-	}
-
-	// 그 뒤 2bytes는 문자열의 길이 (BigEndian)
+	// unsigned 16비트 정수(BigEndian)는 문자열의 길이
 	lenBuf := make([]byte, 2)
 	if _, err := io.ReadFull(r, lenBuf); err != nil {
 		return "", err
