@@ -24,6 +24,46 @@ type ChunkStream struct {
 	UseExtTS    bool
 }
 
+func readAMF0Obj(r io.Reader) (map[string]interface{}, error) {
+	obj := make(map[string]interface{})
+
+	for {
+		// key 길이
+		var keyLen uint16
+		// 리플렉션으로 keyLen의 type을 알아냄
+		if err := binary.Read(r, binary.BigEndian, &keyLen); err != nil {
+			return nil, err
+		}
+
+		if keyLen == 0 {
+			var endMarker byte
+			if err := binary.Read(r, binary.BigEndian, &endMarker); err != nil {
+				return nil, err
+			}
+			if endMarker == 0x09 {
+				break
+			}
+		}
+
+		// key 문자열 값
+		keyBuf := make([]byte, keyLen)
+		if _, err := io.ReadFull(r, keyBuf); err != nil {
+			return nil, err
+		}
+		key := string(keyBuf)
+
+		// value
+		val, err := ReadAMF0(r)
+		if err != nil {
+			return nil, err
+		}
+
+		obj[key] = val
+	}
+
+	return obj, nil
+}
+
 // 맨앞에 1byte 마커를 읽고, 그에 맞는 바디 파서를 호출하는
 func ReadAMF0(r io.Reader) (interface{}, error) {
 	marker := make([]byte, 1)
@@ -41,8 +81,8 @@ func ReadAMF0(r io.Reader) (interface{}, error) {
 	case 0x02:
 		return readAMF0String(r)
 	// Object (Map 구조)
-	//case 0x03:
-
+	case 0x03:
+		return readAMF0Obj(r)
 	// Null
 	case 0x05:
 		return nil, nil
@@ -78,10 +118,15 @@ func processCompleteMessage(stream *ChunkStream) {
 		tx := txObj.(float64)
 
 		// 3. Command Object
+		metaObj, err := ReadAMF0(reader)
+		if err != nil {
+			return
+		}
+		metaMap := metaObj.(map[string]interface{})
 
 		// 4. Optional User Arguments
 
-		log.Printf("종합 분석 완료 -> 명령어: %s, 트랜잭션 ID: %.0f", cmd, tx)
+		log.Printf("종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
 	}
 }
 
