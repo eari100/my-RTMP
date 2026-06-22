@@ -92,7 +92,110 @@ func ReadAMF0(r io.Reader) (interface{}, error) {
 	}
 }
 
-func processCompleteMessage(stream *ChunkStream) {
+//// todo:
+//func sendMessage(w io.Writer, size uint32, fmt uint8, csid uint8) error {
+//	buf := new(bytes.Buffer)
+//
+//	// 1. Chunk Basic Header (1 byte)
+//	basicHeader := (fmt << 6) | uint8(csid)
+//	buf.WriteByte(basicHeader)
+//
+//	// 2. Chunk Message Header 처리
+//	if fmt == 0 {
+//		// Timestamp: 3 bytes
+//		// 관례상 0을 넣음 (나중에 매개변수로 처리해야되나?)
+//		buf.Write([]byte{0x00, 0x00, 0x00})
+//
+//		// Message Length (3 bytes, Big Endian)
+//		size := uint32(len(payload))
+//
+//	} else if fmt == 1 {
+//
+//	} else if fmt == 2 {
+//
+//	} else if fmt == 3 {
+//
+//	}
+//	_, err := w.Write(buf.Bytes())
+//	return err
+//}
+
+func sendWindowAckSize(w io.Writer, size uint32) error {
+	buf := new(bytes.Buffer)
+
+	// 1. Chunk Basic Header (1 byte)
+	// fmt = 0, CSID=2
+	buf.WriteByte(0x02)
+
+	// 2. Chunk Message Header (11 bytes)
+	// 2-1. Timestamp: 3bytes (0으로 일단)
+	buf.Write([]byte{0x00, 0x00, 0x00})
+
+	// 2-2. Message Length: 3 bytes
+	// payload의 크기가 4니까
+	buf.Write([]byte{0x00, 0x00, 0x04})
+
+	// 2-3. Message Type ID: 1 byte
+	buf.WriteByte(0x05)
+
+	// 2-4. Message Stream ID (제어 메시지는 무조건 0번 스트림)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	// 3. Message Payload (4 바이트)
+	// ⚠️ 주의: 페이로드 내부 데이터는 빅 엔디언입니다.
+	// 우리가 설정할 실제 윈도우 크기 값(예: 2500000)을 채워 넣습니다.
+	binary.Write(buf, binary.BigEndian, size)
+
+	_, err := w.Write(buf.Bytes())
+	if err != nil {
+		log.Printf("WindowAckSize 전송 실패: %v", err)
+		return err
+	}
+
+	log.Printf("➡️ OBS에게 WindowAckSize(%d) 대답 전송 완료!", size)
+	return nil
+}
+
+func sendSetPeerBandwidth(conn net.Conn, size uint32, limitType byte) error {
+	// Fmt 0 헤더(12 bytes, 12+5)
+	buf := make([]byte, 12+5)
+
+	// 1. Basic Header (Fmt:0, CSID: 2)
+	buf[0] = 0x02
+
+	// 2. Message Header (11 bytes)
+	// 2-1. Timestamp (3 bytes)
+	buf[1] = 0
+	buf[2] = 0
+	buf[3] = 0
+
+	// 2-2. MsgLength (3 bytes, payload = 5)
+	buf[4] = 0
+	buf[5] = 0
+	buf[6] = 5
+
+	// 2-3. MsgTypeID (1 byte, Set Peer Bandwidth = 6)
+	buf[7] = 6
+
+	// 2-4. MsgStreamID
+	binary.LittleEndian.PutUint32(buf[8:12], 0)
+
+	// 3. Payload (5 bytes)
+	binary.BigEndian.PutUint32(buf[12:16], size)
+
+	// 4. limitType: 0(Hard), 1(Soft), 2(Dynamic)
+	_, err := conn.Write(buf)
+	if err != nil {
+		log.Printf("SetPeerBandwidth 전송 실패: %v", err)
+		return err
+	}
+
+	log.Printf("➡️ OBS에게 SetPeerBandwidth(%d, Type: %d) 대답 전송 완료!", size, limitType)
+
+	return nil
+}
+
+func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 	switch stream.MsgTypeID {
 	// todo:  7.1.1.  Command Message (20, 17)
 	// AMF 3 (아마 안 쓸듯)
@@ -108,25 +211,43 @@ func processCompleteMessage(stream *ChunkStream) {
 		if err != nil {
 			return
 		}
-		cmd := cmdObj.(string)
+		cmd, ok := cmdObj.(string)
+		if !ok {
+			return
+		}
 
 		// 2. Transaction ID
 		txObj, err := ReadAMF0(reader)
 		if err != nil {
 			return
 		}
-		tx := txObj.(float64)
+		tx, _ := txObj.(float64)
 
-		// 3. Command Object
-		metaObj, err := ReadAMF0(reader)
-		if err != nil {
-			return
+		switch cmd {
+		case "connect":
+			// 3. Command Object
+			metaObj, err := ReadAMF0(reader)
+			if err != nil {
+				return
+			}
+
+			metaMap, ok := metaObj.(map[string]interface{})
+			if !ok {
+				log.Printf("connect 메타데이터 구조가 올바르지 않습니다.")
+				return
+			}
+
+			// 4. Optional User Arguments
+			// 생략
+
+			log.Printf("종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
+
+			sendWindowAckSize(conn, 2_500_000)
+			sendSetPeerBandwidth(conn, 2_500_000, 2)
+
+		default:
+			log.Printf("알 수 없는 AMF0 명령어: %s", cmd)
 		}
-		metaMap := metaObj.(map[string]interface{})
-
-		// 4. Optional User Arguments
-
-		log.Printf("종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
 	}
 }
 
@@ -192,6 +313,17 @@ func handleClient(conn net.Conn) {
 			state.MsgTypeID = headerBuf[6]
 			// 특이사항: MsgStreamID는 Little Endian 규격
 			state.MsgStreamID = binary.LittleEndian.Uint32(headerBuf[7:11])
+			// Extended Timestamp 처리 (타임스탬프가 0xFFFFFF 이면 뒤에 4 bytes 생김)
+			state.UseExtTS = state.Timestamp == 0xFFFFFF
+
+			if state.UseExtTS {
+				extTS := make([]byte, 4)
+				if _, err := io.ReadFull(conn, extTS); err != nil {
+					return
+				}
+
+				state.Timestamp = binary.BigEndian.Uint32(extTS)
+			}
 
 		case 1: // 7 bytes 헤더 (MsgStreamID는 이전 것 재사용)
 			if _, err := io.ReadFull(conn, headerBuf[:7]); err != nil {
@@ -199,9 +331,19 @@ func handleClient(conn net.Conn) {
 			}
 
 			state.TimestampDelta = uint32(headerBuf[0])<<16 | uint32(headerBuf[1])<<8 | uint32(headerBuf[2])
-			state.Timestamp += state.TimestampDelta
 			state.MsgLength = uint32(headerBuf[3])<<16 | uint32(headerBuf[4])<<8 | uint32(headerBuf[5])
 			state.MsgTypeID = headerBuf[6]
+			state.UseExtTS = state.TimestampDelta == 0xFFFFFF
+
+			if state.UseExtTS {
+				extTS := make([]byte, 4)
+				if _, err := io.ReadFull(conn, extTS); err != nil {
+					return
+				}
+				state.TimestampDelta = binary.BigEndian.Uint32(extTS)
+			}
+
+			state.Timestamp += state.TimestampDelta
 
 		case 2: // 3 bytes 헤더 (Length, Type, StreamID 모두 이전 것 재사용)
 			if _, err := io.ReadFull(conn, headerBuf[:3]); err != nil {
@@ -209,25 +351,34 @@ func handleClient(conn net.Conn) {
 			}
 
 			state.TimestampDelta = uint32(headerBuf[0])<<16 | uint32(headerBuf[1])<<8 | uint32(headerBuf[2])
+			state.UseExtTS = state.TimestampDelta == 0xFFFFFF
+
+			if state.UseExtTS {
+				extTS := make([]byte, 4)
+				if _, err := io.ReadFull(conn, extTS); err != nil {
+					return
+				}
+				state.TimestampDelta = binary.BigEndian.Uint32(extTS)
+			}
 			state.Timestamp += state.TimestampDelta
 
 		case 3: // 0 byte 헤더 (이전 헤더 속성 완벽히 재사용)
-			// fmt 3이고 영상 데이터 도중이라면 TimestampDelta만큼 더해줌
+
+			if state.UseExtTS {
+				extTS := make([]byte, 4)
+				if _, err := io.ReadFull(conn, extTS); err != nil {
+					return
+				}
+
+				if len(state.FullPayload) == 0 {
+					state.TimestampDelta = binary.BigEndian.Uint32(extTS)
+				}
+			}
+
+			// fmt 3이고 영상 데이터 도중이라면 TimestampDelta 만큼 더해줌
 			if len(state.FullPayload) == 0 { // 0 이라면 분할 시작이라는 뜻이 되니까 그때만 timestamp 증가 시킴
 				state.Timestamp += state.TimestampDelta
 			}
-		}
-
-		// Extended Timestamp 처리 (타임스탬프가 0xFFFFFF 이면 뒤에 4 bytes 생김)
-		state.UseExtTS = fmtBytes < 3 && (state.Timestamp == 0xFFFFFF || state.Timestamp == 0xFFFFFFF)
-
-		if state.UseExtTS {
-			extTS := make([]byte, 4)
-			if _, err := io.ReadFull(conn, extTS); err != nil {
-				return
-			}
-
-			state.Timestamp = binary.BigEndian.Uint32(extTS)
 		}
 
 		// --- [단계 3] 현재 청크 크기만큼만 정확하게 잘라서 읽기 ---
@@ -254,7 +405,7 @@ func handleClient(conn net.Conn) {
 				log.Printf("⚙️ OBS 요청으로 Chunk Size 변경됨: %d 바이트", chunkSize)
 			}
 
-			processCompleteMessage(state)
+			processCompleteMessage(conn, state)
 
 			// 다음 패킷을 받기 위해 버퍼 초기화
 			state.FullPayload = nil
