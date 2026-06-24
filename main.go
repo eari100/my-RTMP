@@ -195,6 +195,142 @@ func sendSetPeerBandwidth(conn net.Conn, size uint32, limitType byte) error {
 	return nil
 }
 
+// 0x02 + length(2 bytes) + string
+func appendAMFString(buf []byte, s string) []byte {
+	buf = append(buf, 0x02)                          // AMF0: string
+	buf = append(buf, byte(len(s)>>8), byte(len(s))) // big endian
+	buf = append(buf, s...)
+
+	return buf
+}
+
+// 0x00 + 8 bytes Float64
+func appendAMFNumber(buf []byte, n float64) []byte {
+	buf = append(buf, 0x00)
+	bits := math.Float64bits(n)
+	buf = append(buf, byte(bits>>56), byte(bits>>48), byte(bits>>40), byte(bits>>32),
+		byte(bits>>24), byte(bits>>16), byte(bits>>8), byte(bits))
+
+	return buf
+}
+
+func appendObjKey(buf []byte, k string) []byte {
+	buf = append(buf, byte(len(k)>>8), byte(len(k)))
+	buf = append(buf, k...)
+
+	return buf
+}
+
+// OBS와 서버 간의 청크의 최대 크기 변경
+// default는 128 bytes 입니다.
+func sendSetChunkSize(conn net.Conn, chunkSize uint32) error {
+	packet := make([]byte, 16)
+
+	// [Fmt: 0 (00)] + [CSID: 2 (000010)] ➡️ 0x02
+	// 💡 CSID 2번은 프로토콜 저수준 제어 전용 차선
+	packet[0] = 0x02
+
+	// MsgLength (3바이트, 4바이트짜리 uint32 숫자가 들어가므로 길이는 무조건 '4')
+	packet[4] = 0
+	packet[5] = 0
+	packet[6] = 4
+
+	// MsgTypeID (1바이트, 청크 크기 설정 명령은 규격서상 '1번')
+	packet[7] = 1
+
+	// MsgStreamID (4바이트, 제어용 통로는 항상 0번 채널, Little Endian)
+	binary.LittleEndian.PutUint32(packet[8:12], 0)
+
+	binary.BigEndian.PutUint32(packet[12:16], chunkSize)
+	_, err := conn.Write(packet)
+	if err != nil {
+		log.Printf("Set Chunk Size 전송 실패: %v", err)
+		return err
+	}
+
+	log.Printf("➡️ OBS에게 Set Chunk Size (%d 바이트) 설정 명령 전송 완료!", chunkSize)
+	return nil
+
+}
+
+func sendConnectResult(conn net.Conn, txID float64) error {
+	// 왜 200 인가?
+	// Command Name: 10 bytes (마커 1 + 길이 2 + 글자 데이터 7)
+	// Transaction ID: 9 bytes (마커 1 + 숫자 데이터 8)
+
+	// Properties: fmsVer + capabilities
+	// fmsVer: 24 bytes(key 8 + value 16), capabilities: 23 bytes(key 14 + value 9)
+
+	// Information: 95 byres
+	// level (key(7) + value(9))
+	// code (key(6) + value(32))
+	// description (key(13) + value(24))
+	// 10 + 9 + 51 + 95 = 165 bytes (200 안넘음)
+	p := make([]byte, 0, 200)
+
+	// 1. Command Name("_result"/"_error")
+	p = appendAMFString(p, "_result")
+
+	// 2. Transaction ID (value: 1)
+	p = appendAMFNumber(p, txID)
+
+	// 3. Properties ("fmsVer", "capabilities")
+	p = append(p, 0x03)
+	p = appendObjKey(p, "fmsVer")
+	// todo: 정말 obs 내에서 "FMS/3,0,1,123"로 받아야 되는 지 볼 것
+	p = appendAMFString(p, "FMS/3,0,1,123")
+
+	p = appendObjKey(p, "capabilities")
+	// 31 -> 1 1 1 1 1(2)
+	// 1번째 비트: 오디오/비디오 스트리밍 지원
+	// 2번째 비트: AMF3 포맷 이해 가능
+	// 3번째 비트: 재연결 및 스트림 제어 명령을 지원
+	// 4번째 비트: 대역폭 관리 및 윈도우 Ack 사이즈 조절 가능
+	// 5번째 비트: RTMP 프로토콜 확장 기능을 지원 (차세대 고화질 코덱 지원, 보안, 대규모 인프라 지원)
+	p = appendAMFNumber(p, 31)
+	p = append(p, 0x00, 0x00, 0x09) // Obj End 마커
+
+	// 4. Information ("code", "level", "description", ...)
+	p = append(p, 0x03) // Object Start 마커
+	p = appendObjKey(p, "level")
+	p = appendAMFString(p, "status")
+	p = appendObjKey(p, "code")
+	p = appendAMFString(p, "NetConnection.Connect.Success")
+	p = appendObjKey(p, "description")
+	p = appendAMFString(p, "Connection succeeded.")
+	p = append(p, 0x00, 0x00, 0x09) // Object End 마커
+
+	// RTMP 헤더 조립 (Fmt: 0, CSID: 3, MsgTypeID: 20)
+	payloadLen := len(p)
+	header := make([]byte, 12)
+	header[0] = 0x03 // Fmt 0, CSID: 3 (명령 제어)
+
+	// Timestamp (3 bytes, 0)
+	header[1], header[2], header[3] = 0, 0, 0
+
+	// MsgLength (3 bytes, big endian)
+	header[4] = byte(payloadLen >> 16)
+	header[5] = byte(payloadLen >> 8)
+	header[6] = byte(payloadLen)
+
+	// MsgTypeID (1 byte)
+	header[7] = 20
+
+	// MsgStreamID (4 byte, 연결 단계는 0번 통로, Little Endian)
+	binary.LittleEndian.PutUint32(header[8:12], 0)
+
+	finalPacket := append(header, p...)
+	_, err := conn.Write(finalPacket)
+	if err != nil {
+		log.Printf("_result 전송 실패: %v", err)
+		return err
+	}
+
+	log.Printf("➡️ OBS에게 connect 성공 응답(_result, TxID: %.0f) 전송 완료!", txID)
+
+	return nil
+}
+
 func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 	switch stream.MsgTypeID {
 	// todo:  7.1.1.  Command Message (20, 17)
@@ -244,6 +380,9 @@ func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 
 			sendWindowAckSize(conn, 2_500_000)
 			sendSetPeerBandwidth(conn, 2_500_000, 2)
+			// 컴퓨터가 알아듣기 좋은 사이즈: 4096 byte
+			sendSetChunkSize(conn, 4096)
+			sendConnectResult(conn, 1)
 
 		default:
 			log.Printf("알 수 없는 AMF0 명령어: %s", cmd)
