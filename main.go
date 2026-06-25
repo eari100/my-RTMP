@@ -360,15 +360,56 @@ func sendCreateStreamResult(conn net.Conn, txID float64) error {
 	return nil
 }
 
+func sendOnStatus(conn net.Conn, txID float64) error {
+	// cmd name
+	p := make([]byte, 0, 30)
+	p = appendAMFString(p, "onStatus")
+
+	// tx ID
+	p = appendAMFNumber(p, txID)
+
+	// cmd obj (null)
+	p = append(p, 0x05)
+
+	// Info Object
+
+	p = append(p, 0x03)
+
+	// 1. level: "warning" | "status" | "error"
+	p = appendObjKey(p, "level")
+	p = appendAMFString(p, "status")
+
+	// 2. code: "NetStream.Play.Start" (시청 시작 승인) | "NetStream.Publish.Start" (송출 시작 승인)
+	p = appendObjKey(p, "code")
+	p = appendAMFString(p, "NetStream.Publish.Start")
+
+	// 3. description: "(자유)"
+	p = appendObjKey(p, "description")
+	p = appendAMFString(p, "Stream is up.")
+
+	p = append(p, 0x00, 0x00, 0x09)
+
+	last_p := append(make_RTMP_header(0x03, uint32(len(p)), 0x14, 1), p...)
+
+	_, err := conn.Write(last_p)
+	if err != nil {
+		log.Printf("❌ onStatus 응답 전송 실패: %v", err)
+		return err
+	}
+
+	log.Println("➡️ OBS에게 방송 송출 승인(onStatus: NetStream.Publish.Start) 완료!")
+	return nil
+}
+
 func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 	switch stream.MsgTypeID {
 	// todo:  7.1.1.  Command Message (20, 17)
 	// AMF 3 (아마 안 쓸듯)
 	case 17:
+		log.Printf("AMF3는 패싱할께요")
 
 	// AMF 0
 	case 20:
-		// todo:
 		reader := bytes.NewReader(stream.FullPayload)
 
 		// 1. Command Name
@@ -405,7 +446,7 @@ func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 			// 4. Optional User Arguments
 			// 생략
 
-			log.Printf("종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
+			log.Printf("connect 종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
 
 			sendWindowAckSize(conn, 2_500_000)
 			sendSetPeerBandwidth(conn, 2_500_000, 2)
@@ -415,20 +456,44 @@ func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 
 		case "releaseStream":
 			log.Printf("🧹 OBS가 스트림 청소를 요청함 (releaseStream) -> 안전하게 패스")
-			// 대답 안 해도 OBS는 다음 단계로 진행합니다.
 
 		case "FCPublish":
 			log.Printf("📢 OBS가 방송 송출 예고를 보냄 (FCPublish) -> 안전하게 패스")
-			// 마찬가지로 패스 가능
 
 		case "createStream":
 			log.Printf("🏗️ OBS가 새로운 스트림 통로 개설을 요청함! (TxID: %.0f)", tx)
 			sendCreateStreamResult(conn, tx)
 
+		case "publish":
+			// 3. Command Object
+			metaObj, err := ReadAMF0(reader)
+			if err != nil {
+				return
+			}
+
+			// 4. Publishing Name
+			pubName, err := ReadAMF0(reader)
+			if err != nil {
+				return
+			}
+
+			// 5. Publishing Type
+			pubType, err := ReadAMF0(reader)
+			if err != nil {
+				return
+			}
+			log.Printf("🚀 [Publish] 방송 송출 요청 분석 완료 -> 명령어: %s, ID: %.0f, 스트림 키(Stream Key): %s, 송출 타입: %s (CommandObj: %v)", cmd, tx, pubName, pubType, metaObj)
+
+			sendOnStatus(conn, tx)
+
 		default:
 			log.Printf("알 수 없는 AMF0 명령어: %s", cmd)
 		}
+
+	default:
+		log.Printf("msgType: %v", stream.MsgTypeID)
 	}
+
 }
 
 // RTMP 청크 리더 루프
