@@ -252,6 +252,27 @@ func sendSetChunkSize(conn net.Conn, chunkSize uint32) error {
 	return nil
 
 }
+func make_RTMP_header(csid byte, payloadLen uint32, msgTypeID byte, streamID uint32) []byte {
+	header := make([]byte, 12)
+	// ex) Fmt 0, CSID: 3 (명령 제어)
+	header[0] = csid
+
+	// Timestamp (3 bytes, 0)
+	header[1], header[2], header[3] = 0, 0, 0
+
+	// MsgLength (3 bytes, big endian)
+	header[4] = byte(payloadLen >> 16)
+	header[5] = byte(payloadLen >> 8)
+	header[6] = byte(payloadLen)
+
+	// MsgTypeID (1 byte)
+	header[7] = msgTypeID
+
+	// MsgStreamID (4 byte, 제어는 0, 방송은 1, Little Endian)
+	binary.LittleEndian.PutUint32(header[8:12], streamID)
+
+	return header
+}
 
 func sendConnectResult(conn net.Conn, txID float64) error {
 	// 왜 200 인가?
@@ -300,26 +321,7 @@ func sendConnectResult(conn net.Conn, txID float64) error {
 	p = appendAMFString(p, "Connection succeeded.")
 	p = append(p, 0x00, 0x00, 0x09) // Object End 마커
 
-	// RTMP 헤더 조립 (Fmt: 0, CSID: 3, MsgTypeID: 20)
-	payloadLen := len(p)
-	header := make([]byte, 12)
-	header[0] = 0x03 // Fmt 0, CSID: 3 (명령 제어)
-
-	// Timestamp (3 bytes, 0)
-	header[1], header[2], header[3] = 0, 0, 0
-
-	// MsgLength (3 bytes, big endian)
-	header[4] = byte(payloadLen >> 16)
-	header[5] = byte(payloadLen >> 8)
-	header[6] = byte(payloadLen)
-
-	// MsgTypeID (1 byte)
-	header[7] = 20
-
-	// MsgStreamID (4 byte, 연결 단계는 0번 통로, Little Endian)
-	binary.LittleEndian.PutUint32(header[8:12], 0)
-
-	finalPacket := append(header, p...)
+	finalPacket := append(make_RTMP_header(0x03, uint32(len(p)), 0x14, 0), p...)
 	_, err := conn.Write(finalPacket)
 	if err != nil {
 		log.Printf("_result 전송 실패: %v", err)
@@ -327,6 +329,33 @@ func sendConnectResult(conn net.Conn, txID float64) error {
 	}
 
 	log.Printf("➡️ OBS에게 connect 성공 응답(_result, TxID: %.0f) 전송 완료!", txID)
+
+	return nil
+}
+
+func sendCreateStreamResult(conn net.Conn, txID float64) error {
+	p := make([]byte, 0, 30)
+
+	// _result
+	p = appendAMFString(p, "_result")
+
+	// Transaction ID
+	p = appendAMFNumber(p, txID)
+
+	// command obj
+	p = append(p, 0x05) // null
+
+	// stream ID
+	p = appendAMFNumber(p, 1.0)
+
+	packet := append(make_RTMP_header(0x03, uint32(len(p)), 0x14, 0), p...)
+	_, err := conn.Write(packet)
+	if err != nil {
+		log.Printf("createStream 응답 전송 실패: %v", err)
+		return err
+	}
+
+	log.Printf("➡️ OBS에게 createStream 성공 응답(_result, StreamID: 1, TxID: %.0f) 전송 완료!", txID)
 
 	return nil
 }
@@ -382,7 +411,19 @@ func processCompleteMessage(conn net.Conn, stream *ChunkStream) {
 			sendSetPeerBandwidth(conn, 2_500_000, 2)
 			// 컴퓨터가 알아듣기 좋은 사이즈: 4096 byte
 			sendSetChunkSize(conn, 4096)
-			sendConnectResult(conn, 1)
+			sendConnectResult(conn, tx)
+
+		case "releaseStream":
+			log.Printf("🧹 OBS가 스트림 청소를 요청함 (releaseStream) -> 안전하게 패스")
+			// 대답 안 해도 OBS는 다음 단계로 진행합니다.
+
+		case "FCPublish":
+			log.Printf("📢 OBS가 방송 송출 예고를 보냄 (FCPublish) -> 안전하게 패스")
+			// 마찬가지로 패스 가능
+
+		case "createStream":
+			log.Printf("🏗️ OBS가 새로운 스트림 통로 개설을 요청함! (TxID: %.0f)", tx)
+			sendCreateStreamResult(conn, tx)
 
 		default:
 			log.Printf("알 수 없는 AMF0 명령어: %s", cmd)
