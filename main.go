@@ -30,6 +30,7 @@ type ChunkStream struct {
 
 type StreamSession struct {
 	Conn                net.Conn
+	Metadata            []byte // 해상도, 비트레이트
 	VideoSequenceHeader []byte
 	AudioSequenceHeader []byte
 	ChunkStreams        map[uint32]*ChunkStream
@@ -333,7 +334,39 @@ func (s *StreamSession) Handle() {
 
 			// AMF 0 metadata (화면 비율, 영상 규격)
 			case 18:
-				log.Printf("ℹ️ [Metadata] 방송 스펙 정보 도착 (크기: %d 바이트)", state.MsgLength)
+				//log.Printf("🔥 [Metadata Hex] %x", state.FullPayload[:20])
+				//if len(s.Metadata) == 0 {
+				//	s.Metadata = s.buildFLVTag(state.MsgTypeID, state.Timestamp, state.FullPayload)
+				//	log.Printf("[Metadata] 방송 스펙 정보 (FLV Tag) 저장 완료 (크기: %d 바이트)", len(s.Metadata))
+				//}
+				//
+				//flvTag := s.buildFLVTag(state.MsgTypeID, state.Timestamp, state.FullPayload)
+				//
+				//if s.Hub != nil {
+				//	s.Hub.Broadcast <- flvTag
+				//}
+
+				realPayload := state.FullPayload
+
+				// 💡 데이터가 최소 16바이트 이상이고, 앞부분이 "@setDataFrame" 문자열 마커인 경우
+				if len(realPayload) >= 16 && realPayload[0] == 0x02 && realPayload[3] == 0x40 { // 0x40은 '@' 의 Hex
+					log.Printf("✂️ [ScriptData] @setDataFrame 마커 검출됨. 16바이트 스킵 처리 진행.")
+					realPayload = realPayload[16:]
+				}
+
+				// 프론트엔드가 눈치채지 못하게 FLV 태그 길이를 '잘라낸 페이로드 크기' 기준으로 다시 빌드
+				if len(s.Metadata) == 0 {
+					// 메타데이터의 Timestamp는 무조건 0으로 주입하는 것이 브라우저 파서 안정성에 좋습니다.
+					s.Metadata = s.buildFLVTag(state.MsgTypeID, 0, realPayload)
+					log.Printf("✅ [Metadata] mpegts.js 전용 순수 onMetaData 저장 완료 (크기: %d 바이트)", len(s.Metadata))
+				}
+
+				flvTag := s.buildFLVTag(state.MsgTypeID, state.Timestamp, realPayload)
+
+				if s.Hub != nil {
+					s.Hub.Broadcast <- flvTag
+				}
+
 			// AMF 3 metadata
 			case 15:
 				log.Printf("AMF 3 metadata 패싱")
@@ -923,10 +956,17 @@ func PlayerHandle(w http.ResponseWriter, r *http.Request, s *StreamSession) {
 		s.Hub.Unregister <- myChan
 	}()
 
+	// 1. 메타데이터 (해상도, 코덱)
+	if len(s.Metadata) > 0 {
+		w.Write(s.Metadata)
+	}
+
+	// 비디오 설정 (SPS/PPS)
 	if len(s.VideoSequenceHeader) > 0 {
 		w.Write(s.VideoSequenceHeader)
 	}
 
+	// AAC Config
 	if len(s.AudioSequenceHeader) > 0 {
 		w.Write(s.AudioSequenceHeader)
 	}
