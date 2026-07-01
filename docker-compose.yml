@@ -17,6 +17,7 @@ services:
     build: .
     ports:
       - "8080:8080"
+      - "1935:1935"
     depends_on:
       - db
     environment:

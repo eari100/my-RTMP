@@ -1013,6 +1013,17 @@ func main() {
 		w.Write(htmlData)
 	})
 
+	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
+		htmlData, err := os.ReadFile("watch.html") // 👈 기존 플레이어 화면 호출
+		if err != nil {
+			http.Error(w, "시청 화면(HTML) 파일을 찾을 수 없습니다.", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(htmlData)
+	})
+
 	http.HandleFunc("/live/", func(w http.ResponseWriter, r *http.Request) {
 		roomName := strings.TrimPrefix(r.URL.Path, "/live/")
 
