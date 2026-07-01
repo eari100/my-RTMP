@@ -23,3 +23,5 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: 3306
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}

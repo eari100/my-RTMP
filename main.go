@@ -994,6 +994,7 @@ func PlayerHandle(w http.ResponseWriter, r *http.Request, s *StreamSession) {
 }
 
 func main() {
+	initOAuthHandlers()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
