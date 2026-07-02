@@ -247,13 +247,26 @@
 <body>
 
 <header class="main-header">
-    <a href="#" class="logo-area">
+    <a href="/" class="logo-area">
         재욱<span>TV</span>
     </a>
     <div class="header-buttons">
         <a href="#" class="nav-btn btn-stream">📹 방송하기</a>
-        <button class="nav-btn btn-login">로그인</button>
+
+        <!-- 🎯 [수정] 로그인 상태에 따라 버튼을 동적으로 바꿉니다 -->
+        {{if .Email}}
+        <!-- 🔓 1. 로그인 성공 시: 동그란 프로필 사진과 이름을 보여줍니다 -->
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="streamer-avatar" style="width: 32px; height: 32px;">
+                <img src="{{.Picture}}" alt="프로필">
+            </div>
+            <span style="font-size: 14px; font-weight: bold; color: var(--text-main);">{{.Name}}님</span>
+            <a href="/auth/logout" class="nav-btn btn-login" style="background-color: #ff4a4a; font-size: 12px; padding: 6px 12px;">로그아웃</a>
+        </div>
+        {{else}}
+        <!-- 🔒 2. 비로그인 상태일 때: 원래 보이던 구글 로그인 버튼 출력 -->
         <a href="/auth/google/login" class="nav-btn btn-login" style="text-decoration: none; text-align: center;">구글 로그인</a>
+        {{end}}
     </div>
 </header>
 

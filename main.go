@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/golang-jwt/jwt/v5"
+	"html/template"
 	"io"
 	"log"
 	"math"
@@ -70,6 +72,8 @@ func NewHub() *Hub {
 		Unregister: make(chan chan []byte),
 	}
 }
+
+var jwtKey []byte
 
 func (h *Hub) Run() {
 	log.Println("[허브 서버] 가동")
@@ -1002,16 +1006,35 @@ func main() {
 			return
 		}
 
-		htmlData, err := os.ReadFile("index.html")
+		loggedInUser := &GoogleUser{}
+
+		tokenCookie, err := r.Cookie("access_token")
+		if err == nil && tokenCookie != nil {
+			token, parseErr := jwt.Parse(tokenCookie.Value, func(token *jwt.Token) (interface{}, error) {
+				return jwtKey, nil // 서명 검증에 사용할 비밀키 반환
+			})
+
+			// 3. 만약 위조되지 않았고 유효기간이 지나지 않은 '진짜 진짜 완벽한 토큰'이라면?
+			if parseErr == nil && token != nil && token.Valid {
+				// 토큰 안의 유저 데이터 꺼내기
+				if claims, ok := token.Claims.(jwt.MapClaims); ok {
+					loggedInUser = &GoogleUser{
+						ID:      claims["user_id"].(string),
+						Name:    claims["user_name"].(string),
+						Picture: claims["picture"].(string),
+						Email:   claims["email"].(string),
+					}
+				}
+			}
+		}
+
+		tmpl, err := template.ParseFiles("index.html")
 		if err != nil {
-			// 만약 파일 이름이 틀렸거나 없다면 500 에러를 뱉습니다.
-			http.Error(w, "HTML 파일을 찾을 수 없습니다.", http.StatusInternalServerError)
+			http.Error(w, "템플릿 로드 에러", http.StatusInternalServerError)
 			return
 		}
 
-		// 웹페이지(HTML)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(htmlData)
+		tmpl.Execute(w, loggedInUser)
 	})
 
 	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {

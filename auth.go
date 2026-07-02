@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/golang-jwt/jwt/v5"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -52,7 +54,6 @@ func initOAuthHandlers() {
 		log.Fatal("🚨 MySQL 드라이버 초기화 실패:", err)
 	}
 
-	// 🎯 [추가] 2. 연결이 진짜 잘 됐는지 네트워크 핑을 때려봅니다.
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("🚨 MySQL 데이터베이스 접속 실패 (Ping 에러):", err)
@@ -69,6 +70,19 @@ func initOAuthHandlers() {
 
 	// 구글 로그인 리다이렉트 핸들러
 	http.HandleFunc("/auth/google/login", func(w http.ResponseWriter, r *http.Request) {
+		returnURL := r.Referer()
+		if returnURL == "" {
+			returnURL = "/"
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "return_to",
+			Value:    returnURL,
+			Path:     "/",
+			MaxAge:   300, // 5분동안 유효
+			HttpOnly: true,
+		})
+
 		url := googleOauthConfig.AuthCodeURL(oauthStateString)
 		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 	})
@@ -105,6 +119,7 @@ func initOAuthHandlers() {
 		}
 
 		// 이메일 조회
+		// todo: 객체에 합칠까?
 		var userId string
 		var userEmail string
 
@@ -114,15 +129,15 @@ func initOAuthHandlers() {
 			log.Println("🆕 새로운 유저 발견! 회원가입을 진행합니다:", googleUser.Email)
 
 			userId = uuid.New().String()
-
 			query := "INSERT INTO users (id, email, name, picture) VALUES (?, ?, ?, ?)"
-
 			_, err := db.Exec(query, userId, googleUser.Email, googleUser.Name, googleUser.Picture)
+
 			if err != nil {
 				log.Println("🚨 회원가입 DB 저장 실패:", err)
 				http.Error(w, "회원가입 실패", http.StatusInternalServerError)
 				return
 			}
+
 			log.Println("🎉 회원가입 완료! 생성된 UUID:", userId)
 		} else if err != nil {
 			log.Println("🚨 DB 조회 중 에러 발생:", err)
@@ -131,7 +146,59 @@ func initOAuthHandlers() {
 		} else {
 			log.Println("🔑 기존 유저 로그인 성공:", userEmail, " (ID:", userId, ")")
 		}
+		expirationTime := time.Now().Add(24 * time.Hour) // 토큰 유효기간: 24시간
 
-		//fmt.Fprintf(w, "처리 완료! 로그인된 유저 UUID: %s, 이메일: %s", userId, googleUser.Email)
+		claims := jwt.MapClaims{
+			"user_id":   userId,
+			"user_name": googleUser.Name,
+			"picture":   googleUser.Picture,
+			"email":     googleUser.Email,
+			"exp":       expirationTime.Unix(), // 만료 시간 초 단위 등록
+		}
+
+		jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		jwtKey = []byte(os.Getenv("JWT_KEY"))
+		tokenString, err := jwtToken.SignedString(jwtKey)
+		if err != nil {
+			log.Println("JWT 서명 실패", err)
+			http.Error(w, "토큰 생성 실패", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "access_token",
+			Value:    tokenString,
+			Path:     "/",
+			MaxAge:   86400, // 24 시간
+			HttpOnly: true,  // js 접근 x
+		})
+
+		finalURL := "/"
+		if cookie, err := r.Cookie("return_to"); err == nil {
+			finalURL = cookie.Value
+
+			// 다 쓰고 폐기
+			http.SetCookie(w, &http.Cookie{
+				Name:     "return_to",
+				Value:    "",
+				Path:     "/",
+				MaxAge:   -1,
+				HttpOnly: true,
+			})
+
+			http.Redirect(w, r, finalURL, http.StatusTemporaryRedirect)
+		}
+	})
+
+	http.HandleFunc("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "access_token",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1, // 즉시 삭제
+			HttpOnly: true,
+		})
+
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }
