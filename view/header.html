@@ -1,25 +1,5 @@
 {{ define "header" }}
 <style>
-    /* 🎨 글로벌 변수 및 초기화 */
-    :root {
-        --bg-main: #0a0a0d;       /* 🖤 진한 블랙 배경 */
-        --bg-card: #131317;       /* 🗂️ 기존 #18181c 보다 어두운 카드/헤더 배경 */
-        --text-main: #94a3b8;     /* 메인 흰색 글씨 */
-        --text-sub: #9ca3af;      /* 연한 회색 글씨 */
-        --point-color: #a855f7;   /* 시그니처 연보라 */
-        --live-color: #ff4a4a;    /* 라이브 빨간색 */
-        --border-color: #26262b;  /* 경계선 색상 */
-    }
-
-    body {
-        background-color: var(--bg-main);
-        color: var(--text-main);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-    }
-
     .logo-area span {
         color: var(--point-color);
     }
@@ -115,17 +95,14 @@
     .btn-login:hover {
         background-color: #3b3b44;
     }
-
 </style>
 <header class="main-header">
     <a href="/" class="logo-area">
         재욱<span>TV</span>
     </a>
     <div class="header-buttons">
-        <a href="#" class="nav-btn btn-stream">📹 방송하기</a>
-
         {{if .Email}}
-
+        <a id="btnStream" class="nav-btn btn-stream">📹 방송하기</a>
         <div style="display: flex; align-items: center; gap: 10px;">
             <div class="streamer-avatar" style="width: 32px; height: 32px;">
                 <img src="{{.Picture}}" alt="프로필">
@@ -139,4 +116,39 @@
         {{end}}
     </div>
 </header>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const streamBtn = document.getElementById('btnStream');
+
+        // 여러 개 뜨지 않도록 방지하기 위한 전역 변수 선언
+        let studioWindow = null;
+
+        if(streamBtn) {
+            streamBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+
+                // 중복 생성 방지 로직
+                // 1. 이미 창이 켜져 있고(null이 아니고) 2. 닫히지 않은 상태라면
+                if (studioWindow && !studioWindow.closed) {
+                    studioWindow.focus();
+                    return;
+                }
+
+                // 팝업창 사이즈 및 정중앙 배치 세팅
+                const width = 520;
+                const height = 650;
+                const left = (window.screen.width / 2) - (width / 2);
+                const top = (window.screen.height / 2) - (height / 2);
+
+                // 백엔드에서 제공할 스튜디오 전용 고유 URL 호출 (예: /studio)
+                studioWindow = window.open(
+                    '/studio',
+                    'studioPopup',
+                    `width=${width},height=${height},left=${left},top=${top},resizable=no,scrollbars=yes,status=no,location=no,toolbar=no`
+                );
+            });
+        }
+    });
+</script>
 {{ end }}

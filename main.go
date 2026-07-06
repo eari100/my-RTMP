@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -58,6 +59,7 @@ type RoomManager struct {
 	Rooms map[string]*StreamSession
 }
 
+// todo: 실시간으로 manager 상태를 볼 수 있는 기능이 있으면 좋을듯
 var manager = &RoomManager{
 	Rooms: make(map[string]*StreamSession),
 }
@@ -1004,7 +1006,7 @@ func main() {
 
 		loggedInUser := GetLoggedInUser(r)
 
-		tmpl, err := template.ParseFiles("view/index.html", "view/header.html")
+		tmpl, err := template.ParseFiles("view/index.html", "view/header.html", "view/global_css.html")
 		if err != nil {
 			http.Error(w, "템플릿 로드 에러", http.StatusInternalServerError)
 			return
@@ -1013,8 +1015,37 @@ func main() {
 		tmpl.Execute(w, loggedInUser)
 	})
 
+	http.HandleFunc("GET /api/rooms/my", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		loggedInUser := GetLoggedInUser(r)
+		if loggedInUser.ID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
+			return
+		}
+
+		var room struct {
+			Title     string `json:"title"`
+			StreamKey string `json:"stream_key"`
+			is_live   bool   `json:"is_live"`
+		}
+
+		err := db.QueryRow("SELECT title, stream_key, is_live FROM rooms WHERE id = ?", loggedInUser.ID).
+			Scan(&room.Title, &room.StreamKey, &room.is_live)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 조회 실패"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(room)
+	})
+
 	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
-		tmpl, err := template.ParseFiles("view/watch.html", "view/header.html")
+		tmpl, err := template.ParseFiles("view/watch.html", "view/header.html", "view/global_css.html")
 		if err != nil {
 			log.Println("🚨 시청 화면 템플릿 파싱 실패:", err)
 			http.Error(w, "시청 화면을 로드하는 중 오류가 발생했습니다.", http.StatusInternalServerError)
@@ -1048,6 +1079,13 @@ func main() {
 		PlayerHandle(w, r, targetSession)
 	})
 
+	http.HandleFunc("GET /studio", func(w http.ResponseWriter, r *http.Request) {
+		tmpl, _ := template.ParseFiles("view/studio.html", "view/global_css.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		tmpl.Execute(w, GetLoggedInUser(r))
+	})
+
 	log.Println("🌐 [HTTP] 웹 시청자용 HTTP-FLV 서버 가동 준비 (포트: 8080)")
 
 	go func() {
@@ -1072,6 +1110,8 @@ func main() {
 		}
 
 		go func(conn net.Conn) {
+			// todo: 스트림키와 user id를 이용한 검증 로직
+
 			// 임시
 			roomName := "tmp-wook"
 

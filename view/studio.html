@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>🔮 스트리머 스튜디오</title>
+    {{ template "global_css" . }}
+    <style>
+        .studio-container {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.05);
+        }
+
+        .modal-title {
+            font-size: 20px; font-weight: bold; margin-top: 0; margin-bottom: 25px;
+            color: var(--point-color); text-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+        }
+
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 13px; color: var(--text-sub); margin-bottom: 8px; font-weight: 600; }
+
+        .studio-input {
+            width: 100%; background-color: var(--bg-main); border: 1px solid var(--border-color);
+            color: var(--text-main); padding: 12px; border-radius: 6px; font-size: 14px;
+            box-sizing: border-box; transition: all 0.2s;
+        }
+        .studio-input:focus { outline: none; border-color: var(--point-color); box-shadow: 0 0 10px rgba(168, 85, 247, 0.2); }
+
+        .copy-input-group { display: flex; gap: 8px; }
+        .btn-copy {
+            background-color: #1e1e24; color: var(--text-main); border: 1px solid #2e2e38;
+            padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer;
+            white-space: nowrap; font-size: 13px; transition: all 0.2s;
+        }
+        .btn-copy:hover { background-color: #2b2b35; border-color: var(--point-color); }
+
+        .btn-save-stream {
+            width: 100%; background-color: var(--point-color); color: #ffffff; border: none;
+            padding: 14px; font-size: 15px; font-weight: bold; border-radius: 6px;
+            cursor: pointer; margin-top: 10px; transition: all 0.2s;
+        }
+        .btn-save-stream:hover { box-shadow: 0 0 20px rgba(168, 85, 247, 0.4); }
+    </style>
+</head>
+<body>
+
+<div class="studio-container">
+    <h3 class="modal-title">🔮 스트리머 스튜디오</h3>
+
+    <form id="streamConfigForm">
+        <div class="form-group">
+            <label for="streamTitle">방송 제목</label>
+            <input type="text" id="streamTitle" class="studio-input" placeholder="시청자들의 마음을 사로잡을 제목을 입력하세요">
+        </div>
+
+        <div class="form-group">
+            <label>RTMP 송출 주소 (URL)</label>
+            <div class="copy-input-group">
+                <input type="text" id="rtmpUrl" class="studio-input" value="rtmp://localhost/live" readonly>
+                <button type="button" class="btn-copy" onclick="copyToClipboard('rtmpUrl')">복사</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>스트림 키 (Stream Key)</label>
+            <div class="copy-input-group">
+                <input type="password" id="streamKey" class="studio-input" value="••••••••••••••••" readonly>
+                <button type="button" class="btn-copy" id="toggleKeyBtn" style="background-color: #0a0a0d;">보기</button>
+                <button type="button" class="btn-copy" onclick="copyToClipboard('streamKey')">복사</button>
+            </div>
+        </div>
+
+        <button type="submit" class="btn-save-stream">적용하기</button>
+    </form>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const toggleKeyBtn = document.getElementById('toggleKeyBtn');
+        const streamKeyInput = document.getElementById('streamKey');
+        const configForm = document.getElementById('streamConfigForm');
+
+        fetch('/api/rooms/my', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('서버 응답 오류');
+            return response.json();
+        })
+        .then(data => {
+            console.log("가져온 방 정보:", data);
+            // 백엔드 세션에서 가져온 값들을 인풋창에 바인딩
+            if (data.title) document.getElementById('streamTitle').value = data.title;
+            if (data.stream_key) document.getElementById('streamKey').value = data.stream_key;
+        })
+        .catch(error => {
+            console.error('AJAX 로드 실패:', error);
+        });
+
+        // 2. 💾 방송 정보 저장하기 (POST/PUT 요청 구현부)
+        configForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const updatedTitle = document.getElementById('streamTitle').value;
+
+            // 추가 저장 구현 시 활용 영역
+            alert('✨ 방송 정보가 저장되었습니다!');
+            window.close(); // 저장 완료 후 자동으로 팝업창 닫기
+        });
+
+        // 3. 👀 스트림 키 토글 기능
+        toggleKeyBtn.addEventListener('click', () => {
+            if (streamKeyInput.type === "password") {
+                streamKeyInput.type = "text";
+                toggleKeyBtn.textContent = "숨기기";
+            } else {
+                streamKeyInput.type = "password";
+                toggleKeyBtn.textContent = "보기";
+            }
+        });
+    });
+
+    // 4. 📋 복사 기능
+    function copyToClipboard(id) {
+        const inputEl = document.getElementById(id);
+        if (!inputEl) return;
+        const originalType = inputEl.type;
+        inputEl.type = "text";
+        inputEl.select();
+        document.execCommand('copy');
+        inputEl.type = originalType;
+        alert('📋 복사가 완료되었습니다!');
+    }
+</script>
+</body>
+</html>
