@@ -23,6 +23,8 @@ import (
 
 var db *sql.DB
 
+var jwtKey []byte
+
 type GoogleUser struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
@@ -139,6 +141,25 @@ func initOAuthHandlers() {
 			}
 
 			log.Println("🎉 회원가입 완료! 생성된 UUID:", userId)
+
+			// 스트림키 생성
+			streamKey := "live_" + uuid.New().String()
+
+			// 초기 제목 세팅
+			defaultTitle := googleUser.Name + "님의 방송국"
+
+			// rooms 테이블 삽입
+			roomQuery := "INSERT INTO rooms (id, user_id, stream_key, title, is_live) VALUES (?, ?, ?, ?, FALSE)"
+			_, roomErr := db.Exec(roomQuery, userId, userId, streamKey, defaultTitle)
+
+			if roomErr != nil {
+				log.Println("🚨 회원가입은 되었으나, 최초 방 생성 실패:", roomErr)
+				http.Error(w, "방송방 생성 실패", http.StatusInternalServerError)
+				return
+			}
+
+			log.Println("📺 유저의 방송 고유 방 생성 완료! 스트림키 발급 완료.")
+
 		} else if err != nil {
 			log.Println("🚨 DB 조회 중 에러 발생:", err)
 			http.Error(w, "DB 오류", http.StatusInternalServerError)
@@ -201,4 +222,40 @@ func initOAuthHandlers() {
 
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
+}
+
+func GetLoggedInUser(r *http.Request) *GoogleUser {
+	tokenCookie, err := r.Cookie("access_token")
+	defaultUser := &GoogleUser{}
+
+	if err != nil || tokenCookie == nil {
+		return defaultUser
+	}
+
+	// 토큰 검증 및 파싱
+	token, parseErr := jwt.Parse(tokenCookie.Value, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil // main.go 등에 정의된 전역 jwtKey 사용
+	})
+
+	if parseErr != nil || token == nil || !token.Valid {
+		return defaultUser
+	}
+
+	// 토큰 안의 유저 데이터 꺼내기
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return defaultUser
+	}
+
+	userId, _ := claims["user_id"].(string)
+	userName, _ := claims["user_name"].(string)
+	picture, _ := claims["picture"].(string)
+	email, _ := claims["email"].(string)
+
+	return &GoogleUser{
+		ID:      userId,
+		Name:    userName,
+		Picture: picture,
+		Email:   email,
+	}
 }

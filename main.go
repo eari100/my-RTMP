@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/golang-jwt/jwt/v5"
 	"html/template"
 	"io"
 	"log"
 	"math"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 )
@@ -72,8 +70,6 @@ func NewHub() *Hub {
 		Unregister: make(chan chan []byte),
 	}
 }
-
-var jwtKey []byte
 
 func (h *Hub) Run() {
 	log.Println("[허브 서버] 가동")
@@ -1006,29 +1002,9 @@ func main() {
 			return
 		}
 
-		loggedInUser := &GoogleUser{}
+		loggedInUser := GetLoggedInUser(r)
 
-		tokenCookie, err := r.Cookie("access_token")
-		if err == nil && tokenCookie != nil {
-			token, parseErr := jwt.Parse(tokenCookie.Value, func(token *jwt.Token) (interface{}, error) {
-				return jwtKey, nil // 서명 검증에 사용할 비밀키 반환
-			})
-
-			// 3. 만약 위조되지 않았고 유효기간이 지나지 않은 '진짜 진짜 완벽한 토큰'이라면?
-			if parseErr == nil && token != nil && token.Valid {
-				// 토큰 안의 유저 데이터 꺼내기
-				if claims, ok := token.Claims.(jwt.MapClaims); ok {
-					loggedInUser = &GoogleUser{
-						ID:      claims["user_id"].(string),
-						Name:    claims["user_name"].(string),
-						Picture: claims["picture"].(string),
-						Email:   claims["email"].(string),
-					}
-				}
-			}
-		}
-
-		tmpl, err := template.ParseFiles("index.html")
+		tmpl, err := template.ParseFiles("view/index.html", "view/header.html")
 		if err != nil {
 			http.Error(w, "템플릿 로드 에러", http.StatusInternalServerError)
 			return
@@ -1038,14 +1014,23 @@ func main() {
 	})
 
 	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
-		htmlData, err := os.ReadFile("watch.html") // 👈 기존 플레이어 화면 호출
+		tmpl, err := template.ParseFiles("view/watch.html", "view/header.html")
 		if err != nil {
-			http.Error(w, "시청 화면(HTML) 파일을 찾을 수 없습니다.", http.StatusInternalServerError)
+			log.Println("🚨 시청 화면 템플릿 파싱 실패:", err)
+			http.Error(w, "시청 화면을 로드하는 중 오류가 발생했습니다.", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(htmlData)
+
+		loggedInUser := GetLoggedInUser(r)
+
+		err = tmpl.Execute(w, loggedInUser)
+		if err != nil {
+			log.Println("🚨 시청 화면 렌더링 실패:", err)
+			http.Error(w, "화면 표시 실패", http.StatusInternalServerError)
+			return
+		}
 	})
 
 	http.HandleFunc("/live/", func(w http.ResponseWriter, r *http.Request) {

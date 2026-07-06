@@ -6,8 +6,8 @@ WORKDIR /app
 
 # 3. 소스 코드를 컨테이너 안으로 복사합니다.
 COPY *.go ./
-COPY index.html ./
-COPY watch.html ./
+COPY view/index.html ./
+COPY view/watch.html ./
 COPY go.mod go.sum* ./
 
 # 의존성 다운로드
