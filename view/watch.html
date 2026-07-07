@@ -284,11 +284,13 @@
     if (typeof mpegts !== 'undefined') {
         var videoElement = document.getElementById('videoElement');
 
-        // 2. 곧바로 플레이어 생성 (최신 브라우저는 내부적으로 자동 지원 여부를 판단합니다)
+        const pathParts = window.location.pathname.split('/');
+        const roomName = pathParts[pathParts.length - 1];
+        
         var player = mpegts.createPlayer({
             type: 'flv',
             isLive: true,
-            url: '/live/tmp-wook'
+            url: `/live/${roomName}`
         });
 
         player.attachMediaElement(videoElement);

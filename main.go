@@ -104,6 +104,7 @@ func (h *Hub) Run() {
 
 func (s *StreamSession) Handle() {
 	defer s.Conn.Close()
+
 	log.Printf("새로운 BJ 연결됨: %s", s.Conn.RemoteAddr().String())
 
 	// 1. 핸드쉐이크
@@ -291,6 +292,15 @@ func (s *StreamSession) Handle() {
 					// 4. Optional User Arguments
 					// 생략
 
+					tcUrl := metaMap["tcUrl"].(string)
+					tcUrlArr := strings.Split(tcUrl, "/")
+					appName := tcUrlArr[len(tcUrlArr)-1]
+
+					if appName != "live" {
+						log.Printf("AppName이 잘못되었습니다. %s", appName)
+						return
+					}
+
 					log.Printf("connect 종합 분석 완료 -> 명령어: %s, ID: %.0f, 앱이름: %v", cmd, tx, metaMap)
 
 					sendWindowAckSize(s.Conn, 2_500_000)
@@ -316,11 +326,38 @@ func (s *StreamSession) Handle() {
 						return
 					}
 
-					// 4. Publishing Name
+					// 4. Publishing Name (스트림 키 추출)
 					pubName, err := ReadAMF0(reader)
 					if err != nil {
 						return
 					}
+
+					streamKey := fmt.Sprintf("%v", pubName)
+					var userID string
+					/// todo: 나중에 추상화
+					dbErr := db.QueryRow("SELECT user_id FROM rooms WHERE stream_key = ?", streamKey).Scan(&userID)
+
+					if dbErr != nil || userID == "" {
+						log.Printf("🚨 인증 실패! 유효하지 않은 스트림 키 접속 시도 차단: %s", streamKey)
+						return
+					}
+
+					// 인증성공 후 manager에 세션 등록
+
+					manager.Lock()
+					manager.Rooms[userID] = s
+					manager.Unlock()
+
+					defer func() {
+						manager.Lock()
+						delete(manager.Rooms, streamKey)
+						manager.Unlock()
+						log.Printf("🚪 방송 송출 종료 및 세션 제거 완료: %s", streamKey)
+					}()
+
+					////////
+
+					//////
 
 					// 5. Publishing Type
 					pubType, err := ReadAMF0(reader)
@@ -1114,7 +1151,7 @@ func main() {
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/watch/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl, err := template.ParseFiles("view/watch.html", "view/header.html", "view/global_css.html")
 		if err != nil {
 			log.Println("🚨 시청 화면 템플릿 파싱 실패:", err)
@@ -1143,8 +1180,14 @@ func main() {
 		}
 
 		manager.RLock() // BJ Rock
-		targetSession := manager.Rooms[roomName]
+		targetSession, exists := manager.Rooms[roomName]
 		manager.RUnlock()
+
+		if !exists || targetSession == nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "현재 방송 중이 아니거나 유효한 방이 아닙니다."})
+			return
+		}
 
 		PlayerHandle(w, r, targetSession)
 	})
@@ -1180,11 +1223,6 @@ func main() {
 		}
 
 		go func(conn net.Conn) {
-			// todo: 스트림키와 user id를 이용한 검증 로직
-
-			// 임시
-			roomName := "tmp-wook"
-
 			roomHub := NewHub()
 			go roomHub.Run()
 
@@ -1195,15 +1233,7 @@ func main() {
 				Hub:          roomHub,
 			}
 
-			manager.Lock()
-			manager.Rooms[roomName] = session
-			manager.Unlock()
-
 			session.Handle()
-
-			manager.Lock()
-			delete(manager.Rooms, roomName)
-			manager.Unlock()
 		}(conn)
 	}
 }
