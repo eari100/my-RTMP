@@ -70,6 +70,9 @@
                 <button type="button" class="btn-copy" id="toggleKeyBtn" style="background-color: #0a0a0d;">보기</button>
                 <button type="button" class="btn-copy" onclick="copyToClipboard('streamKey')">복사</button>
             </div>
+            <button type="button" id="btnResetKey" class="btn-copy" style="width: 100%; border-color: #ef4444; color: #ef4444; justify-content: center;">
+                🔄 스트림 키 재발급 (유출 시 필수)
+            </button>
         </div>
 
         <button type="submit" class="btn-save-stream">적용하기</button>
@@ -81,6 +84,7 @@
         const toggleKeyBtn = document.getElementById('toggleKeyBtn');
         const streamKeyInput = document.getElementById('streamKey');
         const configForm = document.getElementById('streamConfigForm');
+        const btnResetKey = document.getElementById('btnResetKey');
 
         fetch('/api/rooms/my', {
             method: 'GET',
@@ -91,8 +95,6 @@
             return response.json();
         })
         .then(data => {
-            console.log("가져온 방 정보:", data);
-            // 백엔드 세션에서 가져온 값들을 인풋창에 바인딩
             if (data.title) document.getElementById('streamTitle').value = data.title;
             if (data.stream_key) document.getElementById('streamKey').value = data.stream_key;
         })
@@ -100,18 +102,40 @@
             console.error('AJAX 로드 실패:', error);
         });
 
-        // 2. 💾 방송 정보 저장하기 (POST/PUT 요청 구현부)
         configForm.addEventListener('submit', function(e) {
             e.preventDefault();
 
             const updatedTitle = document.getElementById('streamTitle').value;
 
-            // 추가 저장 구현 시 활용 영역
-            alert('✨ 방송 정보가 저장되었습니다!');
-            window.close(); // 저장 완료 후 자동으로 팝업창 닫기
+            if (!updatedTitle.trim()) {
+                alert('방송 제목을 입력해 주세요.');
+                return;
+            }
+
+            fetch('/api/rooms/my', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ title: updatedTitle })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    // 400, 401, 500 등 에러 발생 시 처리
+                    return response.json().then(err => { throw new Error(err.error || '서버 오류'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert('✨ 성공적으로 변경되었습니다!');
+            })
+            .catch(error => {
+                console.error('제목 수정 실패:', error);
+                alert(`🚨 에러 발생: ${error.message}`);
+            });
         });
 
-        // 3. 👀 스트림 키 토글 기능
         toggleKeyBtn.addEventListener('click', () => {
             if (streamKeyInput.type === "password") {
                 streamKeyInput.type = "text";
@@ -121,18 +145,69 @@
                 toggleKeyBtn.textContent = "보기";
             }
         });
+
+        btnResetKey.addEventListener('click', function() {
+            if (!confirm("🚨 정말로 스트림 키를 재발급하시겠습니까?\n재발급 시 기존 키를 사용 중인 OBS 방송 송출이 즉시 차단됩니다.")) {
+                return;
+            }
+
+            fetch('/api/rooms/my/reset-key', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' }
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error || '재발급 실패'); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.stream_key) {
+                        streamKeyInput.value = data.stream_key;
+                        // 새 키가 발급되면 사용자 편의를 위해 인풋을 임시로 보여줍니다.
+                        streamKeyInput.type = "text";
+                        toggleKeyBtn.textContent = "숨기기";
+
+                        alert('✨ 새로운 스트림 키가 발급되었습니다!\nOBS에 새 스트림 키를 복사해서 붙여넣어 주세요.');
+                    }
+                })
+                .catch(error => {
+                    console.error('스트림 키 재발급 실패:', error);
+                    alert(`🚨 에러 발생: ${error.message}`);
+                });
+        });
     });
 
-    // 4. 📋 복사 기능
     function copyToClipboard(id) {
         const inputEl = document.getElementById(id);
         if (!inputEl) return;
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(inputEl.value)
+                .then(() => {
+                    alert('📋 복사가 완료되었습니다!');
+                })
+                .catch(err => {
+                    console.error('클립보드 복사 실패:', err);
+                    fallbackCopyToClipboard(inputEl);
+                });
+        } else {
+            fallbackCopyToClipboard(inputEl);
+        }
+    }
+
+    // 구형 브라우저 & 로컬 환경
+    function fallbackCopyToClipboard(inputEl) {
         const originalType = inputEl.type;
         inputEl.type = "text";
         inputEl.select();
-        document.execCommand('copy');
+        try {
+            document.execCommand('copy');
+            alert('📋 복사가 완료되었습니다!');
+        } catch (err) {
+            alert('🚨 복사에 실패했습니다. 브라우저 설정을 확인해주세요.');
+        }
         inputEl.type = originalType;
-        alert('📋 복사가 완료되었습니다!');
     }
 </script>
 </body>

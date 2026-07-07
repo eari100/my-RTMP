@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -995,6 +996,12 @@ func PlayerHandle(w http.ResponseWriter, r *http.Request, s *StreamSession) {
 	}
 }
 
+func generateStreamKey() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("live_%x", b) // 예: live_a1b2c3d4e5f6...
+}
+
 func main() {
 	initOAuthHandlers()
 
@@ -1042,6 +1049,69 @@ func main() {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(room)
+	})
+
+	http.HandleFunc("POST /api/rooms/my", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		loggedInUser := GetLoggedInUser(r)
+		if loggedInUser.ID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
+			return
+		}
+
+		var requestData struct {
+			Title string `json:"title"`
+		}
+
+		err := json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil || requestData.Title == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "잘못된 요청 데이터입니다."})
+			return
+		}
+
+		_, err = db.Exec("UPDATE rooms SET title = ? WHERE id = ?", requestData.Title, loggedInUser.ID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 수정 실패"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "방송 제목이 성공적으로 변경되었습니다."})
+	})
+
+	http.HandleFunc("POST /api/rooms/my/reset-key", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		loggedInUser := GetLoggedInUser(r)
+		if loggedInUser.ID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
+			return
+		}
+
+		type ResetKeyResponse struct {
+			StreamKey string `json:"stream_key"`
+		}
+
+		newKey := generateStreamKey()
+
+		// todo : 기존 연결 끊어주기
+
+		_, err := db.Exec("UPDATE rooms SET stream_key = ? WHERE user_id = ?", newKey, loggedInUser.ID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 수정 실패"})
+			return
+		}
+
+		fmt.Println("새로 발급된 스트림 키:", newKey)
+
+		resp := ResetKeyResponse{StreamKey: newKey}
+		json.NewEncoder(w).Encode(resp)
 	})
 
 	http.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
