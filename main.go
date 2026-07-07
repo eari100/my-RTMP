@@ -353,6 +353,11 @@ func (s *StreamSession) Handle() {
 					manager.Rooms[userID] = s
 					manager.Unlock()
 
+					_, updateErr := db.Exec("UPDATE rooms SET is_live = true WHERE user_id = ?", userID)
+					if updateErr != nil {
+						log.Printf("🚨 DB is_live=true 업데이트 실패: %v", err)
+					}
+
 					defer func() {
 						manager.Lock()
 						delete(manager.Rooms, userID)
@@ -361,6 +366,12 @@ func (s *StreamSession) Handle() {
 						go func() {
 							liveStatusChan <- false
 						}()
+
+						_, updateErr := db.Exec("UPDATE rooms SET is_live = false WHERE user_id = ?", userID)
+						if updateErr != nil {
+							log.Printf("🚨 DB is_live=false 업데이트 실패: %v", err)
+						}
+
 						log.Printf("🚪 방송 송출 종료 및 세션 제거 완료: %s", streamKey)
 					}()
 
@@ -1237,6 +1248,68 @@ func main() {
 				w.(http.Flusher).Flush() // 바로 브라우저로 밀어버리기
 			}
 		}
+	})
+
+	http.HandleFunc("GET /api/rooms/live", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		isLiveParam := r.URL.Query().Get("is_live")
+		targetStatus := true
+		if isLiveParam == "false" {
+			targetStatus = false
+		}
+
+		// 🎯 닉네임과 프로필 사진을 담을 필드 추가
+		var rooms []struct {
+			UserID   string `json:"user_id"`
+			Title    string `json:"title"`
+			IsLive   bool   `json:"is_live"`
+			UserName string `json:"user_name"`
+			Picture  string `json:"picture"`
+		}
+
+		query := `
+        SELECT r.id, r.title, r.is_live, u.name, u.picture 
+        FROM rooms r
+        INNER JOIN users u ON r.id = u.id
+        WHERE r.is_live = ?
+    `
+
+		rows, err := db.Query(query, targetStatus)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 조회 실패"})
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var room struct {
+				UserID   string `json:"user_id"`
+				Title    string `json:"title"`
+				IsLive   bool   `json:"is_live"`
+				UserName string `json:"user_name"`
+				Picture  string `json:"picture"`
+			}
+
+			if err := rows.Scan(&room.UserID, &room.Title, &room.IsLive, &room.UserName, &room.Picture); err != nil {
+				continue
+			}
+			rooms = append(rooms, room)
+		}
+
+		if rooms == nil {
+			rooms = []struct {
+				UserID   string `json:"user_id"`
+				Title    string `json:"title"`
+				IsLive   bool   `json:"is_live"`
+				UserName string `json:"user_name"`
+				Picture  string `json:"picture"`
+			}{}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(rooms)
 	})
 
 	log.Println("🌐 [HTTP] 웹 시청자용 HTTP-FLV 서버 가동 준비 (포트: 8080)")

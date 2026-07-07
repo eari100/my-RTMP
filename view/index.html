@@ -136,82 +136,144 @@
 <main class="content-wrapper">
     <h2 class="section-title">추천 라이브 방송</h2>
 
-    <div class="stream-grid">
+    <div class="stream-grid" id="live-stream-container">
 
-        <a href="/live-player.html" class="stream-card">
-            <div class="thumbnail-box">
-                <img src="https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600" alt="썸네일">
-                <span class="badge-live">LIVE</span>
-                <span class="badge-viewers">1,245명 시청 중</span>
-            </div>
-            <div class="stream-info">
-                <div class="streamer-avatar">
-                    <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=100" alt="아바타">
-                </div>
-                <div class="stream-detail">
-                    <p class="stream-title">Go 내장 미디어 서버 인코딩 최종 테스트 방송!</p>
-                    <p class="stream-author">재욱개발자</p>
-                    <span class="stream-category">코딩 & 개발</span>
-                </div>
-            </div>
-        </a>
+<!--        <a href="/live-player.html" class="stream-card">-->
+<!--            <div class="thumbnail-box">-->
+<!--                <img src="https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600" alt="썸네일">-->
+<!--                <span class="badge-live">LIVE</span>-->
+<!--                <span class="badge-viewers">1,245명 시청 중</span>-->
+<!--            </div>-->
+<!--            <div class="stream-info">-->
+<!--                <div class="streamer-avatar">-->
+<!--                    <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=100" alt="아바타">-->
+<!--                </div>-->
+<!--                <div class="stream-detail">-->
+<!--                    <p class="stream-title">Go 내장 미디어 서버 인코딩 최종 테스트 방송!</p>-->
+<!--                    <p class="stream-author">재욱개발자</p>-->
+<!--                    <span class="stream-category">코딩 & 개발</span>-->
+<!--                </div>-->
+<!--            </div>-->
+<!--        </a>-->
 
-        <a href="#" class="stream-card">
-            <div class="thumbnail-box">
-                <img src="https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=600" alt="썸네일">
-                <span class="badge-live">LIVE</span>
-                <span class="badge-viewers">843명 시청 중</span>
-            </div>
-            <div class="stream-info">
-                <div class="streamer-avatar">
-                    <img src="https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?q=80&w=100" alt="아바타">
-                </div>
-                <div class="stream-detail">
-                    <p class="stream-title">🎮 2026 레전드 명작 오픈월드 RPG 같이 깨요</p>
-                    <p class="stream-author">겜마스터</p>
-                    <span class="stream-category">게임</span>
-                </div>
-            </div>
-        </a>
+<!--        <a href="#" class="stream-card">-->
+<!--            <div class="thumbnail-box">-->
+<!--                <img src="https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=600" alt="썸네일">-->
+<!--                <span class="badge-live">LIVE</span>-->
+<!--                <span class="badge-viewers">843명 시청 중</span>-->
+<!--            </div>-->
+<!--            <div class="stream-info">-->
+<!--                <div class="streamer-avatar">-->
+<!--                    <img src="https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?q=80&w=100" alt="아바타">-->
+<!--                </div>-->
+<!--                <div class="stream-detail">-->
+<!--                    <p class="stream-title">🎮 2026 레전드 명작 오픈월드 RPG 같이 깨요</p>-->
+<!--                    <p class="stream-author">겜마스터</p>-->
+<!--                    <span class="stream-category">게임</span>-->
+<!--                </div>-->
+<!--            </div>-->
+<!--        </a>-->
 
-        <a href="#" class="stream-card">
-            <div class="thumbnail-box">
-                <img src="https://images.unsplash.com/photo-1516280440614-37939bbacd6a?q=80&w=600" alt="썸네일">
-                <span class="badge-live">LIVE</span>
-                <span class="badge-viewers">320명 시청 중</span>
-            </div>
-            <div class="stream-info">
-                <div class="streamer-avatar">
-                    <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=100" alt="아바타">
-                </div>
-                <div class="stream-detail">
-                    <p class="stream-title">🎸 퇴근길 고막 힐링 잔잔한 어쿠스틱 라디오 방송</p>
-                    <p class="stream-author">뮤직하우스</p>
-                    <span class="stream-category">음악</span>
-                </div>
-            </div>
-        </a>
+<!--        <a href="#" class="stream-card">-->
+<!--            <div class="thumbnail-box">-->
+<!--                <img src="https://images.unsplash.com/photo-1516280440614-37939bbacd6a?q=80&w=600" alt="썸네일">-->
+<!--                <span class="badge-live">LIVE</span>-->
+<!--                <span class="badge-viewers">320명 시청 중</span>-->
+<!--            </div>-->
+<!--            <div class="stream-info">-->
+<!--                <div class="streamer-avatar">-->
+<!--                    <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=100" alt="아바타">-->
+<!--                </div>-->
+<!--                <div class="stream-detail">-->
+<!--                    <p class="stream-title">🎸 퇴근길 고막 힐링 잔잔한 어쿠스틱 라디오 방송</p>-->
+<!--                    <p class="stream-author">뮤직하우스</p>-->
+<!--                    <span class="stream-category">음악</span>-->
+<!--                </div>-->
+<!--            </div>-->
+<!--        </a>-->
 
-        <a href="#" class="stream-card">
-            <div class="thumbnail-box">
-                <img src="https://images.unsplash.com/photo-1552674605-db6ffd4facb5?q=80&w=600" alt="썸네일">
-                <span class="badge-live">LIVE</span>
-                <span class="badge-viewers">2,104명 시청 중</span>
-            </div>
-            <div class="stream-info">
-                <div class="streamer-avatar">
-                    <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=100" alt="아바타">
-                </div>
-                <div class="stream-detail">
-                    <p class="stream-title">⚽️ [해외 축구 민심 분석] 오늘 밤 빅매치 프리뷰 토크</p>
-                    <p class="stream-author">방구석축구왕</p>
-                    <span class="stream-category">스포츠</span>
-                </div>
-            </div>
-        </a>
+<!--        <a href="#" class="stream-card">-->
+<!--            <div class="thumbnail-box">-->
+<!--                <img src="https://images.unsplash.com/photo-1552674605-db6ffd4facb5?q=80&w=600" alt="썸네일">-->
+<!--                <span class="badge-live">LIVE</span>-->
+<!--                <span class="badge-viewers">2,104명 시청 중</span>-->
+<!--            </div>-->
+<!--            <div class="stream-info">-->
+<!--                <div class="streamer-avatar">-->
+<!--                    <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=100" alt="아바타">-->
+<!--                </div>-->
+<!--                <div class="stream-detail">-->
+<!--                    <p class="stream-title">⚽️ [해외 축구 민심 분석] 오늘 밤 빅매치 프리뷰 토크</p>-->
+<!--                    <p class="stream-author">방구석축구왕</p>-->
+<!--                    <span class="stream-category">스포츠</span>-->
+<!--                </div>-->
+<!--            </div>-->
+<!--        </a>-->
 
     </div>
 </main>
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const container = document.getElementById("live-stream-container");
 
+        fetch("/api/rooms/live?is_live=true")
+            .then(res => {
+                if (!res.ok) throw new Error("네트워크 응답 실패");
+                return res.json();
+            })
+            .then(rooms => {
+                container.innerHTML = "";
+
+                // 라이브 중인 방송이 0개일 때 예외 처리
+                if (rooms.length === 0) {
+                    container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--text-sub); padding: 50px 0;">현재 라이브 중인 방송이 없습니다. 😴</p>`;
+                    return;
+                }
+
+                rooms.forEach(room => {
+                    const avatarUrl = room.picture ? room.picture : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=100';
+
+                    const cardHTML = `
+                        <a href="/watch/${room.user_id}" class="stream-card">
+                            <div class="thumbnail-box">
+                                <img src="https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600" alt="썸네일">
+                                <span class="badge-live">LIVE</span>
+                                <span class="badge-viewers">ON AIR</span>
+                            </div>
+                            <div class="stream-info">
+                                <div class="streamer-avatar">
+                                    <img src="${avatarUrl}" alt="${escapeHtml(room.user_name)}의 아바타" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">
+                                </div>
+                                <div class="stream-detail">
+                                    <p class="stream-title">${escapeHtml(room.title)}</p>
+                                    <p class="stream-author">${escapeHtml(room.user_name)}</p>
+                                    <span class="stream-category">스트리밍</span>
+                                </div>
+                            </div>
+                        </a>
+                    `;
+                    container.insertAdjacentHTML("beforeend", cardHTML);
+                });
+            })
+            .catch(err => {
+                console.error("🚨 방송 목록 로드 오류:", err);
+                container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: red; padding: 50px 0;">방송 목록을 불러오지 못했습니다.</p>`;
+            });
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>"']/g, function(m) {
+            switch (m) {
+                case '&': return '&amp;';
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '"': return '&quot;';
+                case "'": return '&#039;';
+                default: return m;
+            }
+        });
+    }
+</script>
 </body>
 </html>
