@@ -41,13 +41,26 @@
             padding: 14px; font-size: 15px; font-weight: bold; border-radius: 6px;
             cursor: pointer; margin-top: 10px; transition: all 0.2s;
         }
+
         .btn-save-stream:hover { box-shadow: 0 0 20px rgba(168, 85, 247, 0.4); }
+
+        /* 🎯 라이브 배지 깜빡임(Pulse) 애니메이션 효과 추가 */
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
     </style>
 </head>
 <body>
 
 <div class="studio-container">
-    <h3 class="modal-title">🔮 스트리머 스튜디오</h3>
+    <h3 class="modal-title">🔮 스트리머 스튜디오
+        <span id="liveBadge" style="display: none; align-items: center; gap: 6px; background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; text-shadow: none;">
+            <span style="width: 8px; height: 8px; background-color: #ef4444; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite;"></span>
+            LIVE 송출 중
+        </span>
+    </h3>
 
     <form id="streamConfigForm">
         <div class="form-group">
@@ -85,6 +98,7 @@
         const streamKeyInput = document.getElementById('streamKey');
         const configForm = document.getElementById('streamConfigForm');
         const btnResetKey = document.getElementById('btnResetKey');
+        const liveBadge = document.getElementById('liveBadge');
 
         fetch('/api/rooms/my', {
             method: 'GET',
@@ -176,6 +190,32 @@
                     alert(`🚨 에러 발생: ${error.message}`);
                 });
         });
+
+        function updateLiveStatus(isLive) {
+            if (isLive) {
+                liveBadge.style.display = 'inline-flex';
+            } else {
+                liveBadge.style.display = 'none';
+            }
+        }
+
+        // SSE 구독
+        const eventSource = new EventSource('/api/rooms/my/stream-status');
+
+        eventSource.onmessage = function(event) {
+            try {
+                const res = JSON.parse(event.data);
+                console.log("📡 실시간 상태 전송옴:", res);
+
+                updateLiveStatus(res.is_live);
+            } catch (err) {
+                console.error("SSE 데이터 파싱 에러:", err);
+            }
+        };
+
+        eventSource.onerror = function(err) {
+            console.error("SSE 연결 시간 초과 또는 오류 발생 (자동 재연결 대기 중...)");
+        };
     });
 
     function copyToClipboard(id) {

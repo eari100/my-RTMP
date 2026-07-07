@@ -74,6 +74,9 @@ func NewHub() *Hub {
 	}
 }
 
+// live sse 체크 chan
+var liveStatusChan = make(chan bool)
+
 func (h *Hub) Run() {
 	log.Println("[허브 서버] 가동")
 	for {
@@ -343,15 +346,21 @@ func (s *StreamSession) Handle() {
 					}
 
 					// 인증성공 후 manager에 세션 등록
-
+					go func() {
+						liveStatusChan <- true
+					}()
 					manager.Lock()
 					manager.Rooms[userID] = s
 					manager.Unlock()
 
 					defer func() {
 						manager.Lock()
-						delete(manager.Rooms, streamKey)
+						delete(manager.Rooms, userID)
 						manager.Unlock()
+
+						go func() {
+							liveStatusChan <- false
+						}()
 						log.Printf("🚪 방송 송출 종료 및 세션 제거 완료: %s", streamKey)
 					}()
 
@@ -1197,6 +1206,37 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 		tmpl.Execute(w, GetLoggedInUser(r))
+	})
+
+	http.HandleFunc("/api/rooms/my/stream-status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		// 브라우저 새로 고침 감지
+		ctx := r.Context()
+
+		loggedInUser := GetLoggedInUser(r)
+		manager.RLock()
+		_, isRunning := manager.Rooms[loggedInUser.ID]
+		manager.RUnlock()
+
+		// 연결 직후 상태 체크
+		fmt.Fprintf(w, "data: {\"is_live\": %t}\n\n", isRunning)
+		w.(http.Flusher).Flush()
+
+		for {
+			select {
+			case <-ctx.Done():
+				// 브라우저가 나감 (연결 종료)
+				return
+			case isLive := <-liveStatusChan:
+				// 방송 상태가 바뀌면 이쪽으로 데이터가 들어옴
+				fmt.Fprintf(w, "data: {\"is_live\": %t}\n\n", isLive)
+				w.(http.Flusher).Flush() // 바로 브라우저로 밀어버리기
+			}
+		}
 	})
 
 	log.Println("🌐 [HTTP] 웹 시청자용 HTTP-FLV 서버 가동 준비 (포트: 8080)")
