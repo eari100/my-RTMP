@@ -1,7 +1,7 @@
 # todo
 
 ## 채팅 붙이기
-## 썸네일 제작 (custom or auto(FFmpeg))
+## 썸네일 제작 (custom or auto(FFmpeg or HLS 적용))
 -----------------------------------
 
 ## 영상 합성 (코덱 만들어보기 or FFmpeg)
