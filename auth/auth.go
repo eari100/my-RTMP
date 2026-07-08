@@ -1,13 +1,13 @@
-package main
+package auth
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"io"
 	"log"
+	"my-RTMP/database"
 	"net/http"
 	"os"
 	"time"
@@ -17,11 +17,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-
-	"github.com/joho/godotenv"
 )
-
-var db *sql.DB
 
 var jwtKey []byte
 
@@ -37,31 +33,7 @@ type GoogleUser struct {
 // CSRF 공격 방지
 const oauthStateString = "random_state_string_for_jw-tv"
 
-func initOAuthHandlers() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Println("⚠️ .env 파일을 로드하는 데 실패했습니다. 파일 위치를 확인하세요.")
-	}
-
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
-
-	db, err = sql.Open("mysql", dsn)
-	if err != nil {
-		log.Fatal("🚨 MySQL 드라이버 초기화 실패:", err)
-	}
-
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("🚨 MySQL 데이터베이스 접속 실패 (Ping 에러):", err)
-	}
-	log.Println("🐬 MySQL 데이터베이스 연결 성공!")
-
+func InitOAuthHandlers() {
 	googleOauthConfig := &oauth2.Config{
 		RedirectURL:  "http://localhost:8080/auth/google/callback",
 		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
@@ -125,14 +97,14 @@ func initOAuthHandlers() {
 		var userId string
 		var userEmail string
 
-		err = db.QueryRow("SELECT id, email FROM users WHERE email = ?", googleUser.Email).Scan(&userId, &userEmail)
+		err = database.DB.QueryRow("SELECT id, email FROM users WHERE email = ?", googleUser.Email).Scan(&userId, &userEmail)
 
 		if err == sql.ErrNoRows {
 			log.Println("🆕 새로운 유저 발견! 회원가입을 진행합니다:", googleUser.Email)
 
 			userId = uuid.New().String()
 			query := "INSERT INTO users (id, email, name, picture) VALUES (?, ?, ?, ?)"
-			_, err := db.Exec(query, userId, googleUser.Email, googleUser.Name, googleUser.Picture)
+			_, err := database.DB.Exec(query, userId, googleUser.Email, googleUser.Name, googleUser.Picture)
 
 			if err != nil {
 				log.Println("🚨 회원가입 DB 저장 실패:", err)
@@ -150,7 +122,7 @@ func initOAuthHandlers() {
 
 			// rooms 테이블 삽입
 			roomQuery := "INSERT INTO rooms (id, user_id, stream_key, title, is_live) VALUES (?, ?, ?, ?, FALSE)"
-			_, roomErr := db.Exec(roomQuery, userId, userId, streamKey, defaultTitle)
+			_, roomErr := database.DB.Exec(roomQuery, userId, userId, streamKey, defaultTitle)
 
 			if roomErr != nil {
 				log.Println("🚨 회원가입은 되었으나, 최초 방 생성 실패:", roomErr)

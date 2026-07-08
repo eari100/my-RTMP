@@ -10,6 +10,9 @@ import (
 	"io"
 	"log"
 	"math"
+	"my-RTMP/auth"
+	"my-RTMP/chat"
+	"my-RTMP/database"
 	"net"
 	"net/http"
 	"strings"
@@ -338,7 +341,7 @@ func (s *StreamSession) Handle() {
 					streamKey := fmt.Sprintf("%v", pubName)
 					var userID string
 					/// todo: 나중에 추상화
-					dbErr := db.QueryRow("SELECT user_id FROM rooms WHERE stream_key = ?", streamKey).Scan(&userID)
+					dbErr := database.DB.QueryRow("SELECT user_id FROM rooms WHERE stream_key = ?", streamKey).Scan(&userID)
 
 					if dbErr != nil || userID == "" {
 						log.Printf("🚨 인증 실패! 유효하지 않은 스트림 키 접속 시도 차단: %s", streamKey)
@@ -353,7 +356,7 @@ func (s *StreamSession) Handle() {
 					manager.Rooms[userID] = s
 					manager.Unlock()
 
-					_, updateErr := db.Exec("UPDATE rooms SET is_live = true WHERE user_id = ?", userID)
+					_, updateErr := database.DB.Exec("UPDATE rooms SET is_live = true WHERE user_id = ?", userID)
 					if updateErr != nil {
 						log.Printf("🚨 DB is_live=true 업데이트 실패: %v", err)
 					}
@@ -367,7 +370,7 @@ func (s *StreamSession) Handle() {
 							liveStatusChan <- false
 						}()
 
-						_, updateErr := db.Exec("UPDATE rooms SET is_live = false WHERE user_id = ?", userID)
+						_, updateErr := database.DB.Exec("UPDATE rooms SET is_live = false WHERE user_id = ?", userID)
 						if updateErr != nil {
 							log.Printf("🚨 DB is_live=false 업데이트 실패: %v", err)
 						}
@@ -1060,7 +1063,9 @@ func generateStreamKey() string {
 }
 
 func main() {
-	initOAuthHandlers()
+	database.Connect()
+	auth.InitOAuthHandlers()
+	chat.InitChatHanders()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -1068,7 +1073,7 @@ func main() {
 			return
 		}
 
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 
 		tmpl, err := template.ParseFiles("view/index.html", "view/header.html", "view/global_css.html")
 		if err != nil {
@@ -1082,7 +1087,7 @@ func main() {
 	http.HandleFunc("GET /api/rooms/my", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 		if loggedInUser.ID == "" {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
@@ -1095,7 +1100,7 @@ func main() {
 			is_live   bool   `json:"is_live"`
 		}
 
-		err := db.QueryRow("SELECT title, stream_key, is_live FROM rooms WHERE id = ?", loggedInUser.ID).
+		err := database.DB.QueryRow("SELECT title, stream_key, is_live FROM rooms WHERE id = ?", loggedInUser.ID).
 			Scan(&room.Title, &room.StreamKey, &room.is_live)
 
 		if err != nil {
@@ -1111,7 +1116,7 @@ func main() {
 	http.HandleFunc("POST /api/rooms/my", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 		if loggedInUser.ID == "" {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
@@ -1129,7 +1134,7 @@ func main() {
 			return
 		}
 
-		_, err = db.Exec("UPDATE rooms SET title = ? WHERE id = ?", requestData.Title, loggedInUser.ID)
+		_, err = database.DB.Exec("UPDATE rooms SET title = ? WHERE id = ?", requestData.Title, loggedInUser.ID)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 수정 실패"})
@@ -1143,7 +1148,7 @@ func main() {
 	http.HandleFunc("POST /api/rooms/my/reset-key", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 		if loggedInUser.ID == "" {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"error": "로그인이 필요합니다."})
@@ -1158,7 +1163,7 @@ func main() {
 
 		// todo : 기존 연결 끊어주기
 
-		_, err := db.Exec("UPDATE rooms SET stream_key = ? WHERE user_id = ?", newKey, loggedInUser.ID)
+		_, err := database.DB.Exec("UPDATE rooms SET stream_key = ? WHERE user_id = ?", newKey, loggedInUser.ID)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 수정 실패"})
@@ -1171,7 +1176,24 @@ func main() {
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	http.HandleFunc("/watch/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/watch/{id}", func(w http.ResponseWriter, r *http.Request) {
+		watchID := r.PathValue("id")
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		if watchID == "" || strings.TrimSpace(watchID) == "" {
+
+			w.WriteHeader(http.StatusBadRequest) // 400 Bad Request
+
+			fmt.Fprint(w, `
+            <script>
+                alert("잘못된 접근입니다. 올바른 방송 ID를 입력해주세요. 🧐");
+                window.location.href = "/";
+            </script>
+        `)
+			return
+		}
+
 		tmpl, err := template.ParseFiles("view/watch.html", "view/header.html", "view/global_css.html")
 		if err != nil {
 			log.Println("🚨 시청 화면 템플릿 파싱 실패:", err)
@@ -1179,9 +1201,7 @@ func main() {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 
 		err = tmpl.Execute(w, loggedInUser)
 		if err != nil {
@@ -1216,7 +1236,7 @@ func main() {
 		tmpl, _ := template.ParseFiles("view/studio.html", "view/global_css.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-		tmpl.Execute(w, GetLoggedInUser(r))
+		tmpl.Execute(w, auth.GetLoggedInUser(r))
 	})
 
 	http.HandleFunc("/api/rooms/my/stream-status", func(w http.ResponseWriter, r *http.Request) {
@@ -1228,7 +1248,7 @@ func main() {
 		// 브라우저 새로 고침 감지
 		ctx := r.Context()
 
-		loggedInUser := GetLoggedInUser(r)
+		loggedInUser := auth.GetLoggedInUser(r)
 		manager.RLock()
 		_, isRunning := manager.Rooms[loggedInUser.ID]
 		manager.RUnlock()
@@ -1275,7 +1295,7 @@ func main() {
         WHERE r.is_live = ?
     `
 
-		rows, err := db.Query(query, targetStatus)
+		rows, err := database.DB.Query(query, targetStatus)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "데이터베이스 조회 실패"})
