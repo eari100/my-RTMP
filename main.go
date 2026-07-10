@@ -5,6 +5,7 @@ import (
 	"my-RTMP/auth"
 	"my-RTMP/chat"
 	"my-RTMP/database"
+	"my-RTMP/file"
 	"my-RTMP/rtmp"
 	"my-RTMP/view"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 func main() {
 	database.Connect()
 	auth.InitOAuthHandlers()
+	file.FileRegisterRoutes()
+
 	chat.InitChatHanders()
 	rtmp.InitRoomHandlers()
 	view.InitViewHandlers()

@@ -31,6 +31,9 @@ func Serve() {
 				ChunkStreams:   make(map[uint32]*ChunkStream),
 				Hub:            roomHub,
 				LiveStatusChan: make(chan bool),
+				DumpFile:       nil,   // publish 단계에서 실제 파일이 열리기 전까지는 nil
+				FrameCount:     0,     // 모인 프레임 수 초기화
+				ThumbnailDone:  false, // 썸네일 생성 완료 여부 플래그
 			}
 
 			session.Handle()

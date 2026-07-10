@@ -10,6 +10,8 @@ import (
 	"my-RTMP/database"
 	"my-RTMP/flv"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -36,11 +38,15 @@ type StreamSession struct {
 	ChunkSize           uint32
 	Hub                 *Hub
 	LiveStatusChan      chan bool // 방송 중인지 체크하는 채널
+	DumpFile            *os.File
+	FrameCount          int
+	ThumbnailDone       bool
 }
 
 func (s *StreamSession) Handle() {
 	defer s.Conn.Close()
 
+	var userID string
 	log.Printf("새로운 BJ 연결됨: %s", s.Conn.RemoteAddr().String())
 
 	// 1. 핸드쉐이크
@@ -269,7 +275,7 @@ func (s *StreamSession) Handle() {
 					}
 
 					streamKey := fmt.Sprintf("%v", pubName)
-					var userID string
+
 					/// todo: 나중에 추상화
 					dbErr := database.DB.QueryRow("SELECT user_id FROM rooms WHERE stream_key = ?", streamKey).Scan(&userID)
 
@@ -292,6 +298,12 @@ func (s *StreamSession) Handle() {
 						log.Printf("🚨 DB is_live=true 업데이트 실패: %v", err)
 					}
 
+					// 서버 부하 문제를 고려해서 한번만 썸네일을 따자
+					// 인증 성공 직후 파일 오픈
+					s.DumpFile, _ = os.Create(fmt.Sprintf("./static/thumbnails/%s.flv", userID))
+					// FLV 표준 헤더 주입 (간단히 9바이트 구성)
+					s.DumpFile.Write([]byte{0x46, 0x4C, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00})
+
 					defer func() {
 						GlobalRoomManager.Lock()
 						delete(GlobalRoomManager.Rooms, userID)
@@ -306,7 +318,16 @@ func (s *StreamSession) Handle() {
 							log.Printf("🚨 DB is_live=false 업데이트 실패: %v", err)
 						}
 
-						log.Printf("🚪 방송 송출 종료 및 세션 제거 완료: %s", streamKey)
+						// 썸네일 제거
+						jpgPath := fmt.Sprintf("./static/thumbnails/%s.jpg", userID)
+						if err := os.Remove(jpgPath); err != nil {
+							// 파일이 처음부터 없었거나(추출 실패 등) 권한 문제가 있을 때만 로그를 남깁니다.
+							log.Printf("[Thumbnail] 방송 종료 후 썸네일 삭제 실패 또는 파일 없음: %v", err)
+						} else {
+							log.Printf("[Thumbnail] 방송 종료로 인해 썸네일 파일 삭제 완료: %s", jpgPath)
+						}
+
+						log.Printf("방송 송출 종료 및 세션 제거 완료: %s", streamKey)
 					}()
 
 					////////
@@ -379,6 +400,37 @@ func (s *StreamSession) Handle() {
 				if s.Hub != nil {
 					s.Hub.Broadcast <- flvTag
 				}
+
+				if s.DumpFile != nil && !s.ThumbnailDone {
+					s.DumpFile.Write(flvTag)
+					s.FrameCount++
+
+					// 약 30프레임(1~2초 분량)이 모이면 파일을 닫고 ffmpeg로 파일에서 이미지 추출
+					if s.FrameCount >= 30 {
+						s.DumpFile.Close()
+						s.DumpFile = nil
+						s.ThumbnailDone = true
+
+						go func(key string) {
+							flvPath := fmt.Sprintf("./static/thumbnails/%s.flv", key)
+							jpgPath := fmt.Sprintf("./static/thumbnails/%s.jpg", key)
+
+							cmd := exec.Command("ffmpeg", "-y", "-i", flvPath, "-vframes", "1", jpgPath)
+
+							// 로그
+							cmd.Stderr = os.Stderr
+							cmd.Stdout = os.Stdout
+
+							if err := cmd.Run(); err != nil {
+								log.Printf("[Thumbnail] 추출 실패 (userID: %s): %v", key, err)
+								return
+							}
+
+							os.Remove(flvPath) // 용량 확보를 위해 임시 flv 파일 삭제
+							log.Println("[Thumbnail] 로컬 파일 덤프 방식으로 썸네일 생성 성공!")
+						}(userID)
+					}
+				}
 			// audio
 			case 8:
 				// AAC Config 저장
@@ -403,18 +455,18 @@ func (s *StreamSession) Handle() {
 			state.FullPayload = nil
 		}
 
-		log.Printf("🔍 [State 변환] Fmt: %d | CSID: %d | MsgType: %d | MsgLen: %d | TS: %d (Delta: %d) | StreamID: %d | ExtTS: %t | PayloadCollected: %d/%d",
-			state.Fmt,
-			state.CSID,
-			state.MsgTypeID,
-			state.MsgLength,
-			state.Timestamp,
-			state.TimestampDelta,
-			state.MsgStreamID,
-			state.UseExtTS,
-			len(state.FullPayload), // 현재까지 모인 바이트 수
-			state.MsgLength,        // 모아야 하는 총 바이트 수
-		)
+		//log.Printf("🔍 [State 변환] Fmt: %d | CSID: %d | MsgType: %d | MsgLen: %d | TS: %d (Delta: %d) | StreamID: %d | ExtTS: %t | PayloadCollected: %d/%d",
+		//	state.Fmt,
+		//	state.CSID,
+		//	state.MsgTypeID,
+		//	state.MsgLength,
+		//	state.Timestamp,
+		//	state.TimestampDelta,
+		//	state.MsgStreamID,
+		//	state.UseExtTS,
+		//	len(state.FullPayload), // 현재까지 모인 바이트 수
+		//	state.MsgLength,        // 모아야 하는 총 바이트 수
+		//)
 	}
 }
 
