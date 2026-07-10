@@ -26,10 +26,11 @@ func Serve() {
 			go roomHub.Run()
 
 			session := &StreamSession{
-				Conn:         conn,
-				ChunkSize:    128,
-				ChunkStreams: make(map[uint32]*ChunkStream),
-				Hub:          roomHub,
+				Conn:           conn,
+				ChunkSize:      128,
+				ChunkStreams:   make(map[uint32]*ChunkStream),
+				Hub:            roomHub,
+				LiveStatusChan: make(chan bool),
 			}
 
 			session.Handle()

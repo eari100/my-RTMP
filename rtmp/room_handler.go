@@ -11,9 +11,6 @@ import (
 	"strings"
 )
 
-// live sse 체크 chan
-var LiveStatusChan = make(chan bool)
-
 // 추후 flv 패키지 안으로 넎는 것을 고려해볼 것.. 안해도 되고 뭐
 func playerHandle(w http.ResponseWriter, r *http.Request, s *StreamSession) {
 	log.Printf("[HTTP] 새로운 시청자가 브라우저로 접속했습니다: %s", r.RemoteAddr)
@@ -278,26 +275,29 @@ func InitRoomHandlers() {
 
 		loggedInUser := auth.GetLoggedInUser(r)
 		GlobalRoomManager.RLock()
-		_, isRunning := GlobalRoomManager.Rooms[loggedInUser.ID]
+		session, isRunning := GlobalRoomManager.Rooms[loggedInUser.ID]
 		GlobalRoomManager.RUnlock()
 
 		// 연결 직후 상태 체크
 		fmt.Fprintf(w, "data: {\"is_live\": %t}\n\n", isRunning)
 		w.(http.Flusher).Flush()
 
+		if !isRunning || session == nil {
+			return
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
 				// 브라우저가 나감 (연결 종료)
 				return
-			case isLive := <-LiveStatusChan:
+			case isLive := <-session.LiveStatusChan:
 				// 방송 상태가 바뀌면 이쪽으로 데이터가 들어옴
 				fmt.Fprintf(w, "data: {\"is_live\": %t}\n\n", isLive)
 				w.(http.Flusher).Flush() // 바로 브라우저로 밀어버리기
 			}
 		}
 	})
-
 }
 
 func generateStreamKey() string {

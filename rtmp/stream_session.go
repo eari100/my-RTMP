@@ -35,6 +35,7 @@ type StreamSession struct {
 	ChunkStreams        map[uint32]*ChunkStream
 	ChunkSize           uint32
 	Hub                 *Hub
+	LiveStatusChan      chan bool // 방송 중인지 체크하는 채널
 }
 
 func (s *StreamSession) Handle() {
@@ -277,13 +278,14 @@ func (s *StreamSession) Handle() {
 						return
 					}
 
-					// 인증성공 후 manager에 세션 등록
-					go func() {
-						LiveStatusChan <- true
-					}()
 					GlobalRoomManager.Lock()
 					GlobalRoomManager.Rooms[userID] = s
 					GlobalRoomManager.Unlock()
+
+					// 인증성공 후 manager에 세션 등록
+					go func() {
+						s.LiveStatusChan <- true
+					}()
 
 					_, updateErr := database.DB.Exec("UPDATE rooms SET is_live = true WHERE user_id = ?", userID)
 					if updateErr != nil {
@@ -296,7 +298,7 @@ func (s *StreamSession) Handle() {
 						GlobalRoomManager.Unlock()
 
 						go func() {
-							LiveStatusChan <- false
+							s.LiveStatusChan <- false
 						}()
 
 						_, updateErr := database.DB.Exec("UPDATE rooms SET is_live = false WHERE user_id = ?", userID)
