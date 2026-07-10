@@ -414,8 +414,8 @@ func (s *StreamSession) Handle() {
 						go func(key string) {
 							flvPath := fmt.Sprintf("./static/thumbnails/%s.flv", key)
 							jpgPath := fmt.Sprintf("./static/thumbnails/%s.jpg", key)
-
-							cmd := exec.Command("ffmpeg", "-y", "-i", flvPath, "-vframes", "1", jpgPath)
+							textFilter := "drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='JaeWook TV':x=w-tw-10:y=h-th-10:fontsize=40:fontcolor=white:borderw=2:bordercolor=black"
+							cmd := exec.Command("ffmpeg", "-y", "-i", flvPath, "-vf", textFilter, "-vframes", "1", jpgPath)
 
 							// 로그
 							cmd.Stderr = os.Stderr
