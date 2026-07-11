@@ -50,6 +50,50 @@
             70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+
+        .obs-guide {
+            margin-top: 20px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background-color: rgba(168, 85, 247, 0.05);
+            border: 1px dashed var(--point-color);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .obs-header {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--text-main);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .obs-guide p {
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+
+        .btn-obs-download {
+            display: inline-block;
+            background-color: #2e2e38;
+            color: var(--text-main);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-obs-download:hover {
+            background-color: var(--point-color);
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -63,6 +107,17 @@
     </h3>
 
     <form id="streamConfigForm">
+        <div class="obs-guide">
+            <div class="obs-header">
+                <img src="https://obsproject.com/favicon.ico" alt="OBS" style="width:20px; height:20px; vertical-align:middle;">
+                <span>OBS Studio가 설치되어 있지 않나요?</span>
+            </div>
+            <p>방송을 시작하려면 송출 프로그램(OBS Studio)이 필요합니다. 아래에서 최신 버전을 다운로드하고, 위에서 복사한 서버 주소와 스트림 키를 설정하세요!</p>
+            <a href="https://obsproject.com/ko" target="_blank" class="btn-obs-download">
+                OBS Studio 다운로드 받기 →
+            </a>
+        </div>
+
         <div class="form-group">
             <label for="streamTitle">방송 제목</label>
             <input type="text" id="streamTitle" class="studio-input" placeholder="시청자들의 마음을 사로잡을 제목을 입력하세요">
