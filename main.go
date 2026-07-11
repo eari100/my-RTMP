@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/joho/godotenv"
 	"log"
 	"my-RTMP/auth"
 	"my-RTMP/chat"
@@ -12,6 +13,7 @@ import (
 )
 
 func main() {
+	_ = godotenv.Load()
 	database.Connect()
 	auth.InitOAuthHandlers()
 	file.FileRegisterRoutes()

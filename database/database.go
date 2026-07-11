@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"github.com/joho/godotenv"
 	"log"
 	"os"
 )
@@ -11,11 +10,6 @@ import (
 var DB *sql.DB
 
 func Connect() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Println("database: .env 파일을 로드하는 데 실패했습니다. 환경변수를 확인하세요.")
-	}
-
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
 		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
@@ -24,14 +18,15 @@ func Connect() {
 		os.Getenv("DB_NAME"),
 	)
 
-	DB, err = sql.Open("mysql", dsn)
-	if err != nil {
-		log.Fatal("MySQL 드라이버 초기화 실패:", err)
+	var dbErr error
+	DB, dbErr = sql.Open("mysql", dsn)
+	if dbErr != nil {
+		log.Fatal("MySQL 드라이버 초기화 실패:", dbErr)
 	}
 
-	err = DB.Ping()
-	if err != nil {
-		log.Fatal("MySQL 데이터베이스 접속 실패 (Ping 에러):", err)
+	dbErr = DB.Ping()
+	if dbErr != nil {
+		log.Fatal("MySQL 데이터베이스 접속 실패 (Ping 에러):", dbErr)
 	}
 	log.Println("MySQL 데이터베이스 연결 성공!")
 }
