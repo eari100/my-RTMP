@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -414,7 +415,16 @@ func (s *StreamSession) Handle() {
 						go func(key string) {
 							flvPath := fmt.Sprintf("./static/thumbnails/%s.flv", key)
 							jpgPath := fmt.Sprintf("./static/thumbnails/%s.jpg", key)
-							textFilter := "drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='JaeWook TV':x=w-tw-10:y=h-th-10:fontsize=40:fontcolor=white:borderw=2:bordercolor=black"
+
+							fontPath := ""
+							if runtime.GOOS == "windows" {
+								fontPath = "C\\:/Windows/Fonts/arial.ttf"
+							} else { // linux
+								fontPath = "/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf"
+							}
+
+							textFilter := fmt.Sprintf("drawtext=fontfile='%s':text='JaeWook TV':x=w-tw-10:y=h-th-10:fontsize=40:fontcolor=white:borderw=2:bordercolor=black", fontPath)
+
 							cmd := exec.Command("ffmpeg", "-y", "-i", flvPath, "-vf", textFilter, "-vframes", "1", jpgPath)
 
 							// 로그
