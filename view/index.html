@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>재욱TV - 라이브 방송 리스트</title>
+    <title>재욱TV - 라이브 방송</title>
     {{ template "global_css" . }}
     <style>
         /* ==========================================================================
@@ -236,7 +236,7 @@
                     const cardHTML = `
                         <a href="/watch/${room.user_id}" class="stream-card">
                             <div class="thumbnail-box">
-                                <img src="/static/thumbnails/${room.user_id}.jpg" alt="썸네일">
+                                <img src="/static/thumbnails/${room.user_id}.jpg?t=${new Date().getTime()}" alt="썸네일">
                                 <span class="badge-live">LIVE</span>
                                 <!--<span class="badge-viewers"></span>-->
                             </div>

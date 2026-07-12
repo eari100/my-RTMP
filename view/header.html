@@ -101,13 +101,13 @@
         재욱<span>TV</span>
     </a>
     <div class="header-buttons">
-        {{if .Email}}
+        {{if .User.Email}}
         <a id="btnStream" class="nav-btn btn-stream">📹 방송하기</a>
         <div style="display: flex; align-items: center; gap: 10px;">
             <div class="streamer-avatar" style="width: 32px; height: 32px;">
-                <img src="{{.Picture}}" alt="프로필">
+                <img src="{{.User.Picture}}" alt="프로필">
             </div>
-            <span style="font-size: 14px; font-weight: bold; color: var(--text-main);">{{.Name}}님</span>
+            <span style="font-size: 14px; font-weight: bold; color: var(--text-main);">{{.User.Name}}님</span>
             <a href="/auth/logout" class="nav-btn btn-login" style="background-color: #ff4a4a; font-size: 12px; padding: 6px 12px;">로그아웃</a>
         </div>
         {{else}}

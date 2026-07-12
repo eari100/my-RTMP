@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Go 내장 라이브 방송국</title>
+    <title>{{ .Title }} - 재욱 TV</title>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
     {{ template "global_css" . }}
     <style>
@@ -453,10 +453,19 @@
             }
         });
 
-        // 에러 핸들링도 추가해두면 디버깅할 때 있어보입니다.
+        // 에러 핸들링도 추가
         player.on(mpegts.Events.ERROR, function(errType, errDetail) {
             console.error("플레이어 에러:", errType, errDetail);
         });
+
+        // 마우스 호버 시 소리 나게 이벤트 (최초 1번만)
+        // document.addEventListener('mouseenter', function() {
+        //     const video = document.getElementById('videoElement');
+        //     if (video && video.muted) {
+        //         video.muted = false;
+        //         console.log("페이지 진입 후 최초 마우스 감지: 음소거 해제");
+        //     }
+        // }, { once: true });
 
     } else {
         alert("mpegts.js 라이브러리를 로드할 수 없습니다. 인터넷 연결을 확인해주세요.");
