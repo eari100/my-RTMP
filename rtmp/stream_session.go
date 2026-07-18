@@ -364,9 +364,10 @@ func (s *StreamSession) Handle() {
 
 				realPayload := state.FullPayload
 
-				// 💡 데이터가 최소 16바이트 이상이고, 앞부분이 "@setDataFrame" 문자열 마커인 경우
+				// 데이터가 최소 16바이트 이상이고, 앞부분이 "@setDataFrame" 문자열 마커인 경우
+				// 1(AMF0 type) + 2(string length) + 15(@setDataFrame) = 16 bytes
 				if len(realPayload) >= 16 && realPayload[0] == 0x02 && realPayload[3] == 0x40 { // 0x40은 '@' 의 Hex
-					log.Printf("✂️ [ScriptData] @setDataFrame 마커 검출됨. 16바이트 스킵 처리 진행.")
+					log.Printf("[ScriptData] @setDataFrame 마커 검출됨. 16바이트 스킵 처리 진행.")
 					realPayload = realPayload[16:]
 				}
 
@@ -389,6 +390,9 @@ func (s *StreamSession) Handle() {
 			// video
 			case 9:
 				// SPS/PPS 저장
+				// H.264(AVC) 라는 것을 산정
+				// 0000 0111 (0x17): AVC(H.264)
+				// 0x00 디코더 (AVC Sequence Header)
 				if len(state.FullPayload) >= 2 && state.FullPayload[0] == 0x17 && state.FullPayload[1] == 0x00 {
 					if len(s.VideoSequenceHeader) == 0 {
 						s.VideoSequenceHeader = flv.BuildFLVTag(state.MsgTypeID, state.Timestamp, state.FullPayload)
@@ -444,6 +448,11 @@ func (s *StreamSession) Handle() {
 			// audio
 			case 8:
 				// AAC Config 저장
+				// 0xAF (1010 11 1 1)
+				// 1010: ACC 코덱
+				// 11: 44.1 kHz 샘플링 코덱 (CD 음질)
+				// 1: SoundSize 16-bit 샘플
+				// 1: Stereo 타입
 				if len(state.FullPayload) >= 2 && state.FullPayload[0] == 0xAF && state.FullPayload[1] == 0x00 {
 					if len(s.AudioSequenceHeader) == 0 {
 						s.AudioSequenceHeader = flv.BuildFLVTag(state.MsgTypeID, state.Timestamp, state.FullPayload)

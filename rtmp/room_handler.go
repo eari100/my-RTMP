@@ -38,7 +38,7 @@ func playerHandle(w http.ResponseWriter, r *http.Request, s *StreamSession) {
 	}
 	w.Write(flvHeader)
 
-	// 8 bytes 시청자 주소 파이프
+	// sliceHeader(24 bytes) * 512(2^9) = 12KB 메모리 소모해서 안전하게
 	myChan := make(chan []byte, 512)
 
 	s.Hub.Register <- myChan
